@@ -34,7 +34,7 @@ def get_embedding_model():
         
     if _embedding_model is None:
         try:
-            _embedding_model = SentenceTransformer('bge-m3')
+            _embedding_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
             current_app.logger.info("Embedding model loaded successfully")
         except Exception as e:
             current_app.logger.error(f"Failed to load embedding model: {e}")
