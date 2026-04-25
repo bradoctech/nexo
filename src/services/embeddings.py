@@ -34,7 +34,7 @@ def get_embedding_model():
         
     if _embedding_model is None:
         try:
-            _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            _embedding_model = SentenceTransformer('bge-m3')
             current_app.logger.info("Embedding model loaded successfully")
         except Exception as e:
             current_app.logger.error(f"Failed to load embedding model: {e}")
@@ -264,16 +264,30 @@ def basic_text_search_chunks(user_id, query, filters=None, top_k=5):
                     chunks_query = chunks_query.filter(Recording.meeting_date <= filters['date_to'])
         
         # Text search - filter stop words and rank by match count
-        stop_words = {'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been',
-                       'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-                       'would', 'could', 'should', 'may', 'might', 'shall', 'can',
-                       'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
-                       'up', 'about', 'into', 'through', 'during', 'before', 'after',
-                       'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'both',
-                       'it', 'its', 'this', 'that', 'these', 'those', 'what', 'which',
-                       'who', 'whom', 'how', 'when', 'where', 'why',
-                       'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she',
-                       'his', 'her', 'they', 'them', 'their'}
+        #stop_words = {'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been',
+        #               'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+        #               'would', 'could', 'should', 'may', 'might', 'shall', 'can',
+        #               'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
+        #               'up', 'about', 'into', 'through', 'during', 'before', 'after',
+        #               'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'both',
+        #               'it', 'its', 'this', 'that', 'these', 'those', 'what', 'which',
+        #               'who', 'whom', 'how', 'when', 'where', 'why',
+        #               'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she',
+        #               'his', 'her', 'they', 'them', 'their'}
+
+        # Text search - filter stop words and rank by match count - Portuguese stop words
+        stop_words = {'um', 'uma', 'uns', 'umas', 'o', 'a', 'os', 'as', 'é', 'são', 'era', 'eram', 
+                        'ser', 'sido', 'sendo', 'seria', 'seriam', 'foi', 'foram', 'está', 'estão', 
+                        'esteve', 'estive', 'ter', 'tenho', 'tem', 'tinha', 'tido', 'faz', 'fazer', 
+                        'feito', 'fazia', 'vai', 'vou', 'iria', 'pode', 'podia', 'poderia', 'deve', 
+                        'devia', 'deveria', 'para', 'de', 'do', 'da', 'em', 'no', 'na', 'por', 'pelo', 
+                        'pela', 'com', 'até', 'desde', 'sobre', 'sob', 'entre', 'dentro', 'através', 
+                        'durante', 'antes', 'depois', 'e', 'mas', 'ou', 'nem', 'não', 'então', 
+                        'ainda', 'ambos', 'ele', 'ela', 'eles', 'elas', 'isso', 'isto', 'aquilo', 
+                        'este', 'esta', 'esse', 'essa', 'estes', 'estas', 'esses', 'essas', 'qual', 
+                        'quais', 'que', 'quem', 'como', 'quando', 'onde', 'por que', 'eu', 'me', 
+                        'meu', 'minha', 'nós', 'nosso', 'nossa', 'você', 'seu', 'sua', 'dele', 'dela', 
+                        'deles', 'delas'}     
 
         query_words = [w for w in query.lower().split() if w not in stop_words and len(w) > 1]
 
