@@ -15,6 +15,7 @@ project_files.md
 notes.md
 docker-compose.yml
 changes.txt
+db_data/
 
 !README.md
 !CLA.md
