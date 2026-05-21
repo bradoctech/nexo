@@ -400,7 +400,7 @@
             <h1 class="text-3xl font-bold text-[var(--text-primary)]">
                 <a href="{{ url_for('recordings.index') }}" class="flex items-center">
                     <img src="{{ url_for('static', filename='img/icon-192x192.png') }}" alt="Speakr Logo" class="h-9 w-9 mr-2">
-                    Speakr
+                    Nexo
                 </a>
             </h1>
             <div class="flex items-center space-x-2">
@@ -1595,7 +1595,7 @@ curl "https://your-speakr-instance.com/api/recordings?token=YOUR_TOKEN_HERE"</co
                             <div class="flex items-center justify-center mb-4">
                                 <img src="{{ url_for('static', filename='img/icon-192x192.png') }}" alt="Speakr Logo" class="h-16 w-16 mr-4">
                                 <div>
-                                    <h2 class="text-3xl font-bold text-[var(--text-primary)]">Speakr</h2>
+                                    <h2 class="text-3xl font-bold text-[var(--text-primary)]">Nexo</h2>
                                     <p class="text-[var(--text-secondary)]" data-i18n="aboutPage.tagline">AI-Powered Audio Transcription & Note-Taking</p>
                                 </div>
                             </div>
@@ -1807,7 +1807,7 @@ curl "https://your-speakr-instance.com/api/recordings?token=YOUR_TOKEN_HERE"</co
         </main>
 
         <footer class="text-center py-4 mt-8 text-xs text-[var(--text-light)] border-t border-[var(--border-primary)]">
-            <span id="footer-text">Speakr &copy; {{ now.year }}</span>
+            <span id="footer-text">Nexo &copy; {{ now.year }}</span>
         </footer>
     </div>
 
@@ -4125,7 +4125,7 @@ curl "https://your-speakr-instance.com/api/recordings?token=YOUR_TOKEN_HERE"</co
                         const data = await response.json();
                         const footerText = document.getElementById('footer-text');
                         if (footerText && data.version) {
-                            footerText.textContent = `Speakr ${data.version} © {{ now.year }}`;
+                            footerText.textContent = `Nexo ${data.version} © {{ now.year }}`;
                         }
                     }
                 } catch (error) {
