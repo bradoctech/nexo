@@ -361,6 +361,13 @@ app = Flask(__name__,
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('SQLALCHEMY_DATABASE_URI', 'sqlite:////data/instance/transcriptions.db')
 app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', '/data/uploads')
 
+# Static files ship with no Cache-Control by default, which lets browsers
+# apply heuristic freshness (often days/weeks for rarely-changed files).
+# After an image upgrade that served users a mix of new templates and stale
+# JS/locale JSON — a blank UI with "Translation not found" spam (issue #357).
+# max-age=0 forces a cheap conditional revalidation (304 unless changed).
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
 # SQLite concurrency settings for multi-worker job queue
 if 'sqlite' in app.config['SQLALCHEMY_DATABASE_URI']:
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
@@ -624,6 +631,18 @@ def csrf_token_aware_check():
     # fails, csrf.protect() raises a CSRFError which Flask-WTF's error
     # handler turns into a 400 response.
     csrf.protect()
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_request_entity_too_large(_error):
+    """Keep oversized requests JSON-shaped even when parsing fails early."""
+    limit_mb = float(app.config['MAX_CONTENT_LENGTH']) / (1024 * 1024)
+    return jsonify({
+        'error': f'File too large. Maximum size is {limit_mb:.0f} MB.',
+        'max_size_mb': limit_mb,
+        'effective_limit_mb': limit_mb,
+        'audio_only_mode': False,
+    }), 413
 
 
 # Add context processor to make 'now' available to all templates
