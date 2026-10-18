@@ -7,6 +7,7 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  language: en
   logo: assets/images/speakr-logo.png
   favicon: assets/images/speakr-logo.png
   palette:
@@ -28,8 +29,6 @@ theme:
         name: Switch to light mode
   
   features:
-    - navigation.instant
-    - navigation.instant.progress
     - navigation.tracking
     - navigation.tabs
     - navigation.tabs.sticky
@@ -56,6 +55,39 @@ plugins:
       separator: '[\s\-\.\_]+'
       lang:
         - en
+        - pt
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: pt_BR
+          name: Português (Brasil)
+          build: true
+          theme:
+            language: pt-BR
+          nav:
+            - Início: index.md
+            - Guia do usuário:
+              - Visão geral: user-guide/index.md
+              - Primeiros passos: user-guide/first-steps.md
+              - Gravar áudio: user-guide/recording.md
+              - Trabalhar com transcrições: user-guide/transcripts.md
+              - Modelos de transcrição: user-guide/transcript-templates.md
+              - Modo Inquire: user-guide/inquire-mode.md
+              - Compartilhar gravações: user-guide/sharing.md
+              - Pastas: user-guide/folders.md
+              - Grupos: user-guide/groups.md
+              - Aplicativo web progressivo: user-guide/pwa.md
+              - Aplicativos complementares: user-guide/companion-apps.md
+              - Configurações da conta: user-guide/settings.md
+              - Tokens de API: user-guide/api-tokens.md
+              - Referência da API: user-guide/api-reference.md
   - minify:
       minify_html: true
       minify_js: true
