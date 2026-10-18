@@ -22,9 +22,19 @@ class Recording(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     # Title will now often be AI-generated, maybe start with filename?
     title = db.Column(db.String(200), nullable=True)  # Allow Null initially
+    # Where the title came from (#412): 'user' (typed in a form, edit or API),
+    # 'auto' (title step: AI, naming template or filename). NULL for recordings
+    # from before #412 and for placeholders; see utils.titles.title_is_user_chosen.
+    title_source = db.Column(db.String(16), nullable=True)
     participants = db.Column(db.String(500))
     notes = db.Column(db.Text)
     transcription = db.Column(db.Text, nullable=True)
+    # Language the transcription service reported for THIS recording, as an
+    # ISO 639-1 code. Recorded at transcription time rather than read from the
+    # user's preference, which is a live setting and would describe today's
+    # configuration rather than the audio. None when the backend did not
+    # report one, or reported something that is not a language code.
+    transcription_language = db.Column(db.String(20), nullable=True)
     summary = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(50), default='PENDING')  # PENDING, PROCESSING, SUMMARIZING, COMPLETED, FAILED
     audio_path = db.Column(db.String(500))
@@ -34,9 +44,16 @@ class Recording(db.Model):
     original_filename = db.Column(db.String(500), nullable=True)  # Store the original uploaded filename
     is_inbox = db.Column(db.Boolean, default=True)  # New recordings are marked as inbox by default
     is_highlighted = db.Column(db.Boolean, default=False)  # Recordings can be highlighted by the user
+    is_archived = db.Column(db.Boolean, default=False)  # Hidden from the main list, nothing deleted (#394)
     mime_type = db.Column(db.String(100), nullable=True)
     audio_duration_seconds = db.Column(db.Float, nullable=True)  # Cached audio duration to avoid materializing remote storage during serialization
     completed_at = db.Column(db.DateTime, nullable=True)
+    # Last change a client can see (mailr spec G2); set by the before_flush
+    # listener in src/services/recording_changes.py, never by hand.
+    updated_at = db.Column(db.DateTime, nullable=True, index=True)
+    # API upload retries (mailr spec G8): a repeat with the same key by the same
+    # user within 24 hours returns this recording.
+    upload_idempotency_key = db.Column(db.String(100), nullable=True)
     processing_time_seconds = db.Column(db.Integer, nullable=True)
     transcription_duration_seconds = db.Column(db.Integer, nullable=True)  # Time taken for transcription
     # Cached audio duration in seconds, populated at transcription
@@ -62,6 +79,11 @@ class Recording(db.Model):
 
     # Speaker embeddings from diarization (JSON dict mapping speaker IDs to 256-dimensional vectors)
     speaker_embeddings = db.Column(db.JSON, nullable=True)
+    # Voice embedding space the embeddings above came from (NULL: legacy space)
+    speaker_embeddings_space_id = db.Column(db.Integer, nullable=True)
+    # Diarization label -> the name it was assigned, so a later rename can
+    # still find the label's embedding after the transcript shows names.
+    speaker_label_map = db.Column(db.JSON, nullable=True)
 
     # Per-recording prompt-template variables (e.g. {"agenda": "...", "attendees": "..."}).
     # Substituted into {{name}} placeholders in the resolved summary prompt at summarisation time.
@@ -317,6 +339,11 @@ class Recording(db.Model):
             return tags, folder, self.folder_id
         return tags, None, None
 
+    def updated_at_z(self):
+        """updated_at (created_at before the first change) as ISO 8601 with Z."""
+        value = self.updated_at or self.created_at
+        return value.strftime('%Y-%m-%dT%H:%M:%S.%fZ') if value else None
+
     def to_list_dict(self, viewer_user=None, duplicate_info_map=None, share_map=None):
         """
         Lightweight dict for list views - excludes expensive HTML conversions.
@@ -352,12 +379,14 @@ class Recording(db.Model):
             'status': self.status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'updated_at': self.updated_at_z(),
             'meeting_date': self.meeting_date.isoformat() if self.meeting_date else None,
             'file_size': self.file_size,
             'original_filename': self.original_filename,
             'mime_type': self.mime_type,  # cheap column read; lets the sidebar mark video recordings without opening them
             'is_inbox': self.is_inbox,
             'is_highlighted': self.is_highlighted,
+            'is_archived': bool(self.is_archived),
             'audio_deleted_at': self.audio_deleted_at.isoformat() if self.audio_deleted_at else None,
             'audio_available': self.audio_deleted_at is None,
             # True only when a playable audio file actually exists yet. A merge
@@ -429,10 +458,12 @@ class Recording(db.Model):
             'participants': self.participants,
             'notes': user_notes,
             'transcription': self.transcription,
+            'transcription_language': self.transcription_language,
             'summary': self.summary,
             'status': self.status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'updated_at': self.updated_at_z(),
             'processing_time_seconds': self.processing_time_seconds,
             'transcription_duration_seconds': self.transcription_duration_seconds,
             'summarization_duration_seconds': self.summarization_duration_seconds,
@@ -442,6 +473,7 @@ class Recording(db.Model):
             'user_id': self.user_id,
             'is_inbox': self.is_inbox,
             'is_highlighted': self.is_highlighted,
+            'is_archived': bool(self.is_archived),
             'mime_type': self.mime_type,
             'audio_deleted_at': self.audio_deleted_at.isoformat() if self.audio_deleted_at else None,
             'audio_available': self.audio_deleted_at is None,
@@ -506,3 +538,21 @@ class TranscriptChunk(db.Model):
             'speaker_name': self.speaker_name,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
+
+
+class RecordingTombstone(db.Model):
+    """A recording a user can no longer see, for the changes feed (mailr spec G2).
+
+    No foreign key to the recording: the row outlives it. Written by the
+    before_flush listener in src/services/recording_changes.py; pruned after
+    RECORDING_TOMBSTONE_DAYS.
+    """
+    __tablename__ = 'recording_tombstone'
+
+    id = db.Column(db.Integer, primary_key=True)
+    recording_id = db.Column(db.Integer, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
+    deleted_at = db.Column(db.DateTime, nullable=False, index=True)
+    reason = db.Column(db.String(20), nullable=False, default='deleted')  # deleted | retention | access_revoked
+
+    __table_args__ = (db.Index('ix_recording_tombstone_user_deleted', 'user_id', 'deleted_at'),)

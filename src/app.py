@@ -1,7 +1,7 @@
 # Speakr - Audio Transcription and Summarization App
 import os
 import sys
-from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, flash, Response, make_response
+from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, flash, Response, make_response, session
 from urllib.parse import urlparse, urljoin, quote
 from email.utils import encode_rfc2231
 from markupsafe import Markup
@@ -33,7 +33,7 @@ mimetypes.add_type('audio/ogg', '.ogg')
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
 from flask_wtf import FlaskForm
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, CSRFError
 from wtforms import StringField, PasswordField, SubmitField, BooleanField
 from wtforms.validators import DataRequired, Length, Email, EqualTo, ValidationError
 from flask_limiter import Limiter
@@ -179,10 +179,18 @@ _markdown_instance = markdown.Markdown(extensions=[
 # limits (login/register/password-reset) are applied via the rate_limit
 # decorator in src/api/auth.py and src/api/tokens.py.
 _RATELIMIT_ENABLED = os.environ.get('RATELIMIT_ENABLED', 'true').lower() != 'false'
+def _token_request_exempt():
+    # Token traffic has per-token limits (src/utils/token_auth.require_scope);
+    # the app-wide per-IP defaults apply to session traffic only (mailr spec G1).
+    from src.utils.token_auth import is_token_request
+    return is_token_request()
+
+
 limiter = Limiter(
     get_remote_address,
     app=None,  # Defer initialization
     default_limits=["5000 per day", "1000 per hour"],
+    default_limits_exempt_when=_token_request_exempt,
     enabled=_RATELIMIT_ENABLED,
 )
 
@@ -351,6 +359,8 @@ def enrich_recording_dict_with_user_status(recording_dict, recording, user):
     user_inbox, user_highlighted = get_user_recording_status(recording, user)
     recording_dict['is_inbox'] = user_inbox
     recording_dict['is_highlighted'] = user_highlighted
+    from src.services.recording_state import get_user_archived
+    recording_dict['is_archived'] = get_user_archived(recording, user)
     return recording_dict
 
 
@@ -485,6 +495,10 @@ else:
 from src.database import db
 db.init_app(app)
 
+# updated_at and tombstones for API clients (mailr spec G2)
+from src.services.recording_changes import register_change_tracking
+register_change_tracking()
+
 # Import all models from extracted modules
 from src.models import (
     User, Speaker, Recording, TranscriptChunk, Share, InternalShare,
@@ -533,7 +547,33 @@ login_manager.login_view = 'auth.login'
 login_manager.login_message_category = 'info'
 bcrypt = Bcrypt()
 bcrypt.init_app(app)
+# Rate-limit headers, including Retry-After on 429 (mailr spec G1).
+app.config.setdefault("RATELIMIT_HEADERS_ENABLED", True)
 limiter.init_app(app)  # Initialize the limiter (uses in-memory storage by default)
+
+
+from flask_limiter.errors import RateLimitExceeded as _RateLimitExceeded
+
+
+@app.errorhandler(_RateLimitExceeded)
+def _rate_limit_exceeded(e):
+    """The limiter's own 429 response, plus Retry-After in seconds (mailr spec G1)."""
+    import time as _time
+    resp = e.get_response()
+    retry = None
+    try:
+        current = limiter.current_limit
+        if current is not None:
+            retry = max(1, int(current.reset_at - _time.time()))
+    except Exception:
+        retry = None
+    if retry is None:
+        try:
+            retry = int(e.limit.limit.get_expiry())
+        except Exception:
+            retry = 60
+    resp.headers["Retry-After"] = str(retry)
+    return resp
 
 # Exempt frequently-polled status endpoints from rate limiting
 @limiter.request_filter
@@ -633,6 +673,89 @@ def csrf_token_aware_check():
     csrf.protect()
 
 
+@app.before_request
+def enforce_token_scopes():
+    """Scoped API tokens (mailr spec G1), checked before any view runs.
+
+    Sessions and full tokens (scopes NULL, every token made before scopes) pass
+    unchanged. A scoped token must come from a header, may only reach routes
+    marked with require_scope, and must hold every scope the route needs.
+    A refused request therefore has no side effect and fires no webhook.
+    """
+    if not request.endpoint or request.endpoint == 'static':
+        return
+    if session.get('_user_id'):
+        return  # a browser session takes precedence over a token, as in Flask-Login
+    from src.utils.token_auth import resolve_request_token, scope_error_response
+    api_token, via_query = resolve_request_token()
+    if api_token is None or api_token.scope_set is None:
+        return
+    if via_query:
+        resp = jsonify({'error': 'Scoped tokens are accepted only in a header (Authorization: Bearer ...)',
+                        'code': 'invalid_token'})
+        resp.status_code = 401
+        return resp
+    view = app.view_functions.get(request.endpoint)
+    required = getattr(view, '_required_scopes', None)
+    if required is None:
+        return scope_error_response(None, api_token)
+    missing = required - api_token.scope_set
+    if missing:
+        return scope_error_response(missing, api_token)
+
+
+
+def _csrf_rejection_message(reason):
+    """Turn a Flask-WTF CSRFError description into something an admin can act on.
+
+    Token failures (missing, expired, mismatched) are fixed by reloading the
+    page. The two referrer failures are not: Flask-WTF checks the Referer
+    header on every HTTPS request, so a proxy that strips it or rewrites the
+    Host header makes every POST fail, however often the token is refreshed
+    (issue #388). Those get a message that names the proxy setting.
+    """
+    if 'referrer header is missing' in reason:
+        return False, ('The request was rejected because the browser sent no Referer header, '
+                       'which HTTPS requests require. A reverse proxy, browser extension or '
+                       'Referrer-Policy header that removes it causes this.')
+    if 'referrer does not match' in reason:
+        referrer_host = urlparse(request.referrer or '').netloc or 'unknown'
+        return False, (f'The request was rejected because this page was loaded from '
+                       f'{referrer_host}, but the server received the request for {request.host}. '
+                       f'The reverse proxy must forward the original Host header (or '
+                       f'X-Forwarded-Host), and TRUSTED_PROXY_HOPS must match the number of proxies.')
+    return True, 'Your session has expired. Please reload the page and try again.'
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(error):
+    """Answer fetch/XHR callers with JSON that says why CSRF validation failed.
+
+    Flask-WTF's default is an HTML 400 page. The frontend cannot tell a
+    referrer failure from an expired token in that page, so it refreshes the
+    token, retries, fails again and shows a generic error, while the server
+    logs nothing. Browser form posts still get the HTML page.
+    """
+    reason = error.description or ''
+    retryable, message = _csrf_rejection_message(reason.lower())
+    app.logger.warning(
+        'CSRF validation failed for %s %s: %s (Referer host: %s, request host: %s, scheme: %s)',
+        request.method, request.path, reason,
+        urlparse(request.referrer or '').netloc or '-', request.host, request.scheme,
+    )
+    is_form_navigation = (
+        request.mimetype in ('application/x-www-form-urlencoded', 'multipart/form-data')
+        and 'text/html' in request.headers.get('Accept', '')
+    )
+    if is_form_navigation:
+        return error
+    return jsonify({
+        'error': message,
+        'csrf_reason': reason,
+        'csrf_retryable': retryable,
+    }), 400
+
+
 @app.errorhandler(RequestEntityTooLarge)
 def handle_request_entity_too_large(_error):
     """Keep oversized requests JSON-shaped even when parsing fails early."""
@@ -657,20 +780,69 @@ def inject_app_name():
     return {'app_name': APP_NAME}
 
 
+from src.utils.i18n_bootstrap import i18n_bootstrap as _i18n_bootstrap
+
+@app.context_processor
+def inject_i18n_bootstrap():
+    """Translations embedded in pages that load i18n.js (includes/i18n_bootstrap.html)."""
+    return {'i18n_bootstrap': _i18n_bootstrap}
+
+@app.context_processor
+def inject_account_theme():
+    """The theme saved with the signed-in user's account (D#419), for
+    includes/theme_account.html. None for a visitor who is not signed in."""
+    from flask import has_request_context
+    from flask_login import current_user
+    if not has_request_context() or not current_user.is_authenticated:
+        return {'account_theme': None}
+    return {'account_theme': {'dark': current_user.theme_dark_mode,
+                              'scheme': current_user.theme_color_scheme}}
+
+
+@app.context_processor
+def inject_inquire_mode_flag():
+    """The shared header shows the Inquire button on every page."""
+    return {'inquire_mode_enabled': ENABLE_INQUIRE_MODE}
+
+
+@app.context_processor
+def inject_help_center_link():
+    """Optional custom help link in the user menu (#371).
+
+    Admins hosting their own FAQ/tutorial page set HELP_CENTER_URL (and
+    optionally HELP_CENTER_LABEL) to surface it prominently for users.
+    """
+    return {
+        'help_center_url': os.environ.get('HELP_CENTER_URL', '').strip(),
+        'help_center_label': os.environ.get('HELP_CENTER_LABEL', '').strip(),
+    }
+
 @app.context_processor
 def inject_group_admin_status():
-    """Inject is_group_admin flag into all templates."""
+    """Inject is_group_admin flag and the admin-group list into all templates.
+
+    user_admin_groups feeds the shared tag/folder modals (group assignment
+    dropdown), which render on the account page AND the main app now that
+    tags/folders can be created inline from the upload dialog.
+    """
     from flask_login import current_user
     from src.models.organization import GroupMembership
 
-    is_group_admin = False
+    user_admin_groups = []
     if current_user.is_authenticated:
-        is_group_admin = GroupMembership.query.filter_by(
+        memberships = GroupMembership.query.filter_by(
             user_id=current_user.id,
             role='admin'
-        ).first() is not None
+        ).all()
+        user_admin_groups = [
+            {'id': m.group.id, 'name': m.group.name}
+            for m in memberships if m.group
+        ]
 
-    return {'is_group_admin': is_group_admin}
+    return {
+        'is_group_admin': bool(user_admin_groups),
+        'user_admin_groups': user_admin_groups,
+    }
 
 # Ensure upload and instance directories exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -753,6 +925,7 @@ from src.api.initial_prompt_templates import initial_prompt_templates_bp
 from src.api.events import events_bp, init_events_helpers
 from src.api.system import system_bp, init_system_helpers
 from src.api.push_notifications import push_bp
+from src.api.notifications import notifications_bp
 from src.api.api_v1 import api_v1_bp, init_api_v1_helpers
 from src.api.recording_sessions import recording_sessions_bp
 from src.api.webhooks import webhooks_bp
@@ -800,6 +973,7 @@ app.register_blueprint(initial_prompt_templates_bp)
 app.register_blueprint(events_bp)
 app.register_blueprint(system_bp)
 app.register_blueprint(push_bp)
+app.register_blueprint(notifications_bp)
 app.register_blueprint(api_v1_bp)
 csrf.exempt(api_v1_bp)  # API v1 uses token auth, not CSRF
 

@@ -32,6 +32,8 @@ TEXT_MODEL_NAME=openai/gpt-4o-mini
 
 **Custom Endpoints**: Speakr works with any OpenAI-compatible API endpoint, including self-hosted solutions like LocalAI, Ollama with OpenAI compatibility, or enterprise API gateways.
 
+**Local servers without a key**: `TEXT_MODEL_API_KEY` is optional. Leave it unset for a server that needs no key, such as Ollama, vLLM or llama.cpp on your own network; set only `TEXT_MODEL_BASE_URL` and `TEXT_MODEL_NAME`.
+
 **Google Gemini (OpenAI-compatible)**: Google exposes Gemini models behind an OpenAI-compatible URL. Point Speakr at it like any other base URL:
 
 ```bash
@@ -130,6 +132,19 @@ Speakr automatically detects when you're using:
 
 1. A GPT-5 model (based on model name)
 2. The official OpenAI API (based on base URL containing `api.openai.com`)
+
+### GPT-5 Through Azure AI Foundry and Other Gateways
+
+The automatic detection only activates on the official OpenAI API URL. If you serve a GPT-5 model through Azure AI Foundry or another gateway, requests fail with an error such as `Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.` In that case, force GPT-5 parameter handling explicitly:
+
+```bash
+# Force GPT-5 parameters (reasoning_effort, verbosity, max_completion_tokens)
+# regardless of the base URL
+GPT5_FORCE_MODE=true
+
+# Same, for a separately configured chat model (not inherited from the above)
+# CHAT_GPT5_FORCE_MODE=true
+```
 
 When both conditions are met, Speakr automatically:
 
@@ -248,10 +263,13 @@ CHAT_MODEL_NAME=openai/gpt-4o
 | Configuration | Behavior |
 |--------------|----------|
 | No `CHAT_MODEL_*` variables set | Chat uses `TEXT_MODEL_*` settings (default) |
-| Only `CHAT_MODEL_NAME` set | Falls back to `TEXT_MODEL_*` (API key required) |
+| Only `CHAT_MODEL_NAME` set | Falls back to `TEXT_MODEL_*` (a key or a base URL is required) |
 | Only `CHAT_MODEL_API_KEY` set | Falls back to `TEXT_MODEL_*` (model name required) |
 | `CHAT_MODEL_API_KEY` + `CHAT_MODEL_NAME` set | Uses chat config with `TEXT_MODEL_BASE_URL` |
+| `CHAT_MODEL_BASE_URL` + `CHAT_MODEL_NAME` set | Uses a dedicated chat server; no key is sent unless `CHAT_MODEL_API_KEY` is set (suits a local server) |
 | All `CHAT_MODEL_*` variables set | Uses fully dedicated chat configuration |
+
+The text model's key is sent only to the text model's server. For a chat model on another server, `CHAT_MODEL_API_KEY` is used, or no key.
 
 ### GPT-5 Settings for Chat
 
@@ -454,8 +472,8 @@ off by default on most backends. The settings below are for vLLM; other servers
   hits in the API response when it is *also* started with
   `--enable-prompt-tokens-details`, which defaults to off. With that flag set,
   each response includes `usage.prompt_tokens_details.cached_tokens`, which
-  Speakr records and displays in the admin dashboard under **System Statistics →
-  Token Usage** as "Cache reads". Without it, caching still works, but the
+  Speakr records and shows in the admin dashboard under **System Statistics →
+  Usage and Cost**, in the prompt-cache line below the language-model chart. Without it, caching still works, but the
   dashboard shows zero cache reads because the server never reports them. You can
   confirm caching independently from vLLM's `/metrics` endpoint, which exposes
   `vllm:prefix_cache_hits_total` and `vllm:prompt_tokens_cached_total` regardless
@@ -492,9 +510,10 @@ Resolution order at upload time:
 1. Per-upload selection (Advanced ASR Options dropdown)
 2. First tag's `default_transcription_model`
 3. Folder's `default_transcription_model`
-4. Global `TRANSCRIPTION_MODEL` env var (current behaviour)
+4. The default transcription model chosen by an administrator in the admin settings
+5. The connector's own model. For the OpenAI, Mistral and VibeVoice connectors this is `TRANSCRIPTION_MODEL`. The `asr_endpoint` connector has none: it sends no `model` parameter, and the ASR service uses its own default.
 
-If the override isn't in `TRANSCRIPTION_MODELS_AVAILABLE`, it's silently dropped and Speakr falls back to the global default — useful as a safety net against stale browser caches sending old model ids.
+If the override isn't in `TRANSCRIPTION_MODELS_AVAILABLE`, it's dropped with a warning in the log and the recording uses the connector's own model, which guards against stale browser caches sending old model ids. The same resolution applies to reprocessing, bulk reprocessing, API v1, watch folders, incognito mode and the startup voice embedding check.
 
 The override is propagated to the connector via the `model` field on `TranscriptionRequest`. Connectors that key on a model name (OpenAI Whisper / Transcribe, Mistral, VibeVoice) honour it directly. The `asr_endpoint` connector forwards the override as a `model=` query parameter; the [whisperx-asr-service](https://github.com/murtaza-nasir/whisperx-asr-service) fork uses it to switch the loaded Whisper model on demand, while the upstream `ahmetoner/whisper-asr-webservice` ignores unknown query parameters, so the override is safe in either case.
 

@@ -142,7 +142,7 @@ For the best transcription and diarization quality, self-hosting an ASR service 
     - Repository: [murtaza-nasir/whisperx-asr-service](https://github.com/murtaza-nasir/whisperx-asr-service)
     - Uses `pyannote/speaker-diarization-community-1` model with exclusive diarization
     - **Superior transcription and diarization quality** with large models (large-v3, distil-large-v3)
-    - Supports 256-dimensional speaker embeddings for voice profile identification
+    - Returns speaker embeddings for voice profile identification
     - Better timestamp alignment between speakers and words
     - **Required for:** Voice profiles, automatic speaker recognition, speaker embeddings
     - **Environment file:** `config/env.whisperx.example`
@@ -156,6 +156,12 @@ For the best transcription and diarization quality, self-hosting an ASR service 
     - **Does not support:** Voice profiles, speaker embeddings, automatic speaker recognition
     - **Environment file:** `config/env.asr.example`
     - **Note:** Do not set `ASR_RETURN_SPEAKER_EMBEDDINGS=true` with this service as it will cause errors
+
+3. **OpenASR** - Local server with diarization and, from openasr#379 onward, speaker embeddings
+    - Website: [openasr.org](https://openasr.org)
+    - **Supports:** Speaker diarization with an exact speaker count, voice profiles when embeddings are enabled
+    - **Environment file:** `config/env.transcription.example` (OpenASR section)
+    - **Setting:** `ASR_RETURN_SPEAKER_EMBEDDINGS=true` to enable voice profile features on a server that supports it
 
 > **Important:** Before proceeding with this configuration, you'll need to set up one of the ASR service containers. See [Running ASR Service for Speaker Diarization](#running-asr-service-for-speaker-diarization) for complete instructions on deploying both containers together or separately.
 
@@ -186,7 +192,7 @@ The ASR_BASE_URL depends on your deployment architecture:
 - **Same Docker Compose stack:** Use the service name (e.g., `http://whisperx-asr:9000` or `http://whisper-asr:9000`) - Docker's internal networking
 - **Separate machine:** Use the full URL with IP address or domain name (e.g., `http://192.168.1.100:9000`)
 
-Speaker diarization is automatically enabled when using ASR endpoints. The system will identify different speakers in your recordings and label them as Speaker 1, Speaker 2, and so on. You can optionally override the default speaker detection settings by uncommenting and adjusting ASR_MIN_SPEAKERS and ASR_MAX_SPEAKERS in your environment file.
+Speaker diarization is automatically enabled when using ASR endpoints. The system will identify different speakers in your recordings and label them as Speaker 1, Speaker 2, and so on. You can optionally override the default speaker detection settings by uncommenting and adjusting ASR_MIN_SPEAKERS and ASR_MAX_SPEAKERS in your environment file. These two values are the instance-wide default: a speaker count chosen at upload, or set on a tag or folder, takes precedence. When only a minimum is set on a tag and it is above ASR_MAX_SPEAKERS, the tag value is used for both.
 
 **Voice Profile Configuration:**
 
@@ -391,7 +397,7 @@ AUTO_PROCESS_WATCH_DIR=/data/auto-process
 AUTO_PROCESS_CHECK_INTERVAL=30
 ```
 
-When enabled, Speakr checks the watch directory every 30 seconds for new audio files. Any files found are automatically moved to the uploads directory and processed using your configured transcription settings. The `admin_only` mode assigns all processed files to the admin user, but you can also configure it for multi-user scenarios with separate directories for each user.
+When enabled, Speakr checks the watch directory every 30 seconds for new audio files. Any files found are automatically moved to the uploads directory and processed using your configured transcription settings. The `admin_only` mode assigns all processed files to the admin user, but you can also configure it for multi-user scenarios with separate directories for each user (`AUTO_PROCESS_MODE=user_directories`). Per-user subfolders may be named after the user id (`user123` or `123`) or after the username itself, mirroring the naming of the per-user export folders.
 
 To use this feature, you'll need to mount an additional volume in your Docker Compose configuration, which we'll cover in the next steps.
 
@@ -609,6 +615,8 @@ docker compose up -d
 curl http://localhost:9000/health
 ```
 
+Prebuilt images are also published per release, so you can pull instead of building: `learnedmachine/whisperx-asr-service:latest` covers Pascal through Hopper GPUs as well as CPU, and `learnedmachine/whisperx-asr-service:blackwell` covers RTX 50xx cards (the plain `:blackwell` tag is available as of v0.4.0). To use one, replace the `build:` section in the compose snippet below with the corresponding `image:` line.
+
 See the [WhisperX ASR Service README](https://github.com/murtaza-nasir/whisperx-asr-service#readme) for detailed configuration options, troubleshooting, and performance tuning.
 
 !!! warning "PyTorch 2.6 Compatibility"
@@ -657,7 +665,18 @@ services:
       - COMPUTE_TYPE=float16
       - BATCH_SIZE=16
       - HF_TOKEN=your_huggingface_token_here
+      # Store all Hugging Face downloads (including the pyannote diarization
+      # model) in the cache volume below. Without this, the diarization model
+      # is cached inside the container filesystem and is lost whenever the
+      # container is recreated.
+      - HF_HOME=/.cache
       - TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=true  # Required for PyTorch 2.6+
+      # Uncomment after one successful online run with diarization to run
+      # fully offline (models must already be in the cache volume):
+      # - HF_HUB_OFFLINE=1
+      # Unload idle models from VRAM after this many seconds
+      # (0 = keep resident, the default):
+      # - MODEL_KEEP_ALIVE_SECONDS=3600
     deploy:
       resources:
         reservations:

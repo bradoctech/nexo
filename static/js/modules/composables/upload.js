@@ -7,7 +7,14 @@ import * as FailedUploads from '../db/failed-uploads.js';
 import * as IncognitoStorage from '../db/incognito-storage.js';
 import * as RecordingDB from '../db/recording-persistence.js';
 import { getUploadCsrfToken, isCsrfRejection } from '../csrf.js';
+import { shouldSliceUpload, uploadFileInSlices } from '../db/sliced-file-upload.js';
 import { computeUploadTimeout } from '../utils/upload-timeout.js';
+import { recorderInUse } from '../utils/recorder-state.js';
+import { errorTextMatches } from '../utils/error-patterns.js';
+import {
+    sortQueuedForJoin, moveQueuedItem, placeQueuedItem, totalJoinDuration,
+    newJoinGroupId, isVideoFileName, MAX_JOIN_FILES,
+} from '../utils/upload-join.js';
 
 // Parse error message and return friendly error info
 function getFriendlyError(errorMessage, t) {
@@ -19,6 +26,7 @@ function getFriendlyError(errorMessage, t) {
         // generic 413 pattern below; the proxy rejects the request body before
         // Speakr sees it, so enabling chunking on the Speakr side will not help.
         { patterns: ['request entity too large', 'request body is too large', '413 request entity too large'], title: _t('errors.uploadBlockedByProxyTitle'), guidance: _t('errors.uploadBlockedByProxyGuidance') },
+        { patterns: ['storage quota', 'storage is full'], title: _t('storageQuota.title'), guidance: _t('storageQuota.guidance') },
         { patterns: ['maximum content size limit', 'file too large', 'payload too large', 'exceeded', 'content too large'], title: _t('errors.fileTooLargeTitle'), guidance: _t('errors.enableChunkingGuidance') },
         { patterns: ['timed out', 'timeout', 'deadline exceeded'], title: _t('errors.processingTimeout'), guidance: _t('errors.splitAudioGuidance') },
         { patterns: ['401', 'unauthorized', 'invalid api key', 'authentication failed', 'incorrect api key'], title: _t('errors.authenticationError'), guidance: _t('errors.checkApiKeyGuidance') },
@@ -30,7 +38,7 @@ function getFriendlyError(errorMessage, t) {
     ];
     for (const pattern of patterns) {
         for (const p of pattern.patterns) {
-            if (lowerText.includes(p)) return { title: pattern.title, guidance: pattern.guidance };
+            if (errorTextMatches(lowerText, p)) return { title: pattern.title, guidance: pattern.guidance };
         }
     }
     return { title: _t('errors.processingError'), guidance: _t('errors.processingErrorFallbackGuidance') };
@@ -54,12 +62,77 @@ export function useUpload(state, utils) {
         // View state
         currentView, showUploadModal,
         // Upload disclaimer state
-        uploadDisclaimer, showUploadDisclaimerModal
+        uploadDisclaimer, showUploadDisclaimerModal,
+        isRecording
     } = state;
 
     const { computed, nextTick, ref, markRaw } = Vue;
 
     const { setGlobalError, showToast, formatFileSize, onChatComplete, t } = utils;
+
+    // --- Join several files into one recording ------------------------------
+    // Offered once two or more files are queued. The queue order is the join
+    // order; turning the switch on sorts the files by modified time and name.
+    const joinMode = ref(false);
+    const joinTitle = ref('');
+    const joinDragClientId = ref(null);
+    const joinQueuedItems = computed(() => uploadQueue.value.filter(item => item.status === 'queued'));
+    const joinAvailable = computed(() =>
+        joinQueuedItems.value.length >= 2
+        && joinQueuedItems.value.length <= MAX_JOIN_FILES
+        && !(incognitoMode && incognitoMode.value));
+    const joinActive = computed(() => joinMode.value && joinAvailable.value);
+    const joinTotalDuration = computed(() => totalJoinDuration(joinQueuedItems.value));
+    const joinHasVideo = computed(() => joinQueuedItems.value.some(item => isVideoFileName(item.file?.name)));
+
+    const setJoinMode = (on) => {
+        joinMode.value = !!on;
+        if (on) uploadQueue.value = sortQueuedForJoin(uploadQueue.value);
+    };
+    const moveJoinItem = (clientId, delta) => {
+        uploadQueue.value = moveQueuedItem(uploadQueue.value, clientId, delta);
+    };
+    const handleJoinDragStart = (clientId, event) => {
+        joinDragClientId.value = clientId;
+        if (event?.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', clientId);
+        }
+    };
+    const handleJoinDrop = (targetIndex) => {
+        if (joinDragClientId.value) {
+            uploadQueue.value = placeQueuedItem(uploadQueue.value, joinDragClientId.value, targetIndex);
+        }
+        joinDragClientId.value = null;
+    };
+    const handleJoinDragEnd = () => { joinDragClientId.value = null; };
+
+    // One part failed: stop the others and discard what the server holds, so
+    // the user retries the whole join with the files they still have.
+    const failJoinGroup = async (failedItem, message) => {
+        const group = failedItem.join.group;
+        for (const item of uploadQueue.value) {
+            if (item === failedItem || !item.join || item.join.group !== group) continue;
+            if (['ready', 'uploading', 'pending', 'completed'].includes(item.status)) {
+                item.joinCancelled = true;
+                item.status = 'failed';
+                item.error = message;
+                item.progress = 0;
+                if (item._xhr) {
+                    try { item._xhr.abort(); } catch (_) { /* already finished */ }
+                }
+            }
+        }
+        try {
+            const token = await getUploadCsrfToken();
+            await fetch(`/upload/join/${encodeURIComponent(group)}`, {
+                method: 'DELETE',
+                headers: token ? { 'X-CSRFToken': token } : {},
+            });
+        } catch (e) {
+            console.warn('[Upload] Could not discard the uploaded parts of a failed join:', e);
+        }
+    };
 
     // Probe a File for its audio/video duration without uploading it.
     // Uses a hidden <audio> or <video> element with preload="metadata"
@@ -366,9 +439,25 @@ export function useUpload(state, utils) {
     };
 
     // Start processing all queued files
+    // "Upload" closes the modal after queuing; "Upload & Add More" keeps it
+    // open. The flag survives the disclaimer round-trip (startUpload returns
+    // early, acceptUploadDisclaimer re-invokes it) and is reset when the
+    // disclaimer is cancelled (cancelPendingUploadClose).
+    let closeModalAfterUpload = false;
+
+    const startUploadAndClose = () => {
+        closeModalAfterUpload = true;
+        startUpload();
+    };
+
+    const cancelPendingUploadClose = () => {
+        closeModalAfterUpload = false;
+    };
+
     const startUpload = () => {
         const pendingFiles = uploadQueue.value.filter(item => item.status === 'queued');
         if (pendingFiles.length === 0) {
+            closeModalAfterUpload = false;
             return;
         }
         // Show upload disclaimer if configured
@@ -376,6 +465,20 @@ export function useUpload(state, utils) {
             showUploadDisclaimerModal.value = true;
             return;
         }
+        // Joining: every queued file becomes one part of the same group, in
+        // queue order.
+        if (joinActive.value) {
+            const items = joinQueuedItems.value;
+            const group = newJoinGroupId();
+            const title = joinTitle.value.trim();
+            items.forEach((item, index) => {
+                item.join = { group, index, count: items.length, title };
+                item.displayName = `${item.file.name} · ${index + 1}/${items.length}`;
+            });
+        }
+        joinMode.value = false;
+        joinTitle.value = '';
+
         // Update all queued files with current tags and ASR options
         // AND change their status to 'ready' so they move to upload progress immediately
         for (const item of uploadQueue.value) {
@@ -401,6 +504,10 @@ export function useUpload(state, utils) {
         progressPopupMinimized.value = false;
         progressPopupClosed.value = false;
         startProcessingQueue();
+        if (closeModalAfterUpload) {
+            closeModalAfterUpload = false;
+            if (showUploadModal) showUploadModal.value = false;
+        }
     };
 
     // --- Parallel Upload System ---
@@ -447,16 +554,30 @@ export function useUpload(state, utils) {
      * Upload a single file to the server.
      * Acquires a concurrency slot, uploads, then releases.
      * Status updates are per-item (no global processingProgress).
+     *
+     * Files past the slice threshold go up through the sliced-upload
+     * transport instead of one multipart POST, so a reverse proxy whose
+     * body limit is below the file size cannot reject them. Both
+     * transports send the same form and return the same response, so
+     * everything below the transport call is shared.
      */
     const uploadSingleFile = async (fileItem) => {
         await acquireUploadSlot();
+        if (fileItem.joinCancelled) {
+            releaseUploadSlot();
+            return;
+        }
 
         fileItem.status = 'uploading';
         fileItem.progress = 5;
+        const sliced = shouldSliceUpload(fileItem.file);
 
         try {
             const formData = new FormData();
-            formData.append('file', fileItem.file);
+            if (!sliced) formData.append('file', fileItem.file);
+            // A recording made here was checked against the storage quota
+            // when it started, so the server keeps it whatever its size (#413).
+            if (fileItem.fromInProgressRecording) formData.append('from_recorder', 'true');
 
             // Send file's lastModified timestamp for meeting_date
             if (fileItem.file.lastModified) {
@@ -467,8 +588,22 @@ export function useUpload(state, utils) {
                 formData.append('client_tz_offset', new Date().getTimezoneOffset().toString());
             }
 
+            // The browser's IANA zone, so the title of this recording already
+            // uses the uploader's local time (#412).
+            try {
+                const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                if (zone) formData.append('client_timezone', zone);
+            } catch (e) { /* older browser: the account or admin default applies */ }
+
             if (fileItem.notes) {
                 formData.append('notes', fileItem.notes);
+            }
+
+            if (fileItem.join) {
+                formData.append('join_group', fileItem.join.group);
+                formData.append('join_index', String(fileItem.join.index));
+                formData.append('join_count', String(fileItem.join.count));
+                if (fileItem.join.title) formData.append('title', fileItem.join.title);
             }
 
             // Add tags if selected
@@ -563,12 +698,16 @@ export function useUpload(state, utils) {
             const sendUpload = (csrfToken) => new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
 
+                fileItem.serverProcessing = false;
                 xhr.upload.onprogress = (e) => {
                     if (e.lengthComputable) {
                         // Map upload progress to 5-90% range
                         fileItem.progress = Math.round(5 + (e.loaded / e.total) * 85);
                     }
                 };
+                // Every byte is sent; the server now checks and converts the
+                // file before answering, which can take minutes.
+                xhr.upload.onload = () => { fileItem.serverProcessing = true; };
 
                 xhr.onload = () => {
                     const contentType = xhr.getResponseHeader('content-type') || '';
@@ -594,11 +733,18 @@ export function useUpload(state, utils) {
                         return;
                     }
 
-                    if (xhr.status === 202 && parsed.id) {
+                    if (xhr.status === 202 && (parsed.id || parsed.join_pending)) {
                         resolve(parsed);
                     } else if (!String(xhr.status).startsWith('2')) {
                         let errorMsg = parsed.error || `Upload failed with status ${xhr.status}`;
                         if (xhr.status === 413) errorMsg = parsed.error || `File too large. Max: ${parsed.max_size_mb?.toFixed(0) || maxFileSizeMB.value} MB.`;
+                        if (parsed.code === 'storage_quota_exceeded' && t) {
+                            const quotaMsg = t('storageQuota.uploadRefused', {
+                                used: formatFileSize(parsed.used_bytes), quota: formatFileSize(parsed.quota_bytes),
+                                file: formatFileSize(parsed.file_bytes),
+                            });
+                            if (quotaMsg && quotaMsg !== 'storageQuota.uploadRefused') errorMsg = quotaMsg;
+                        }
                         const err = new Error(errorMsg);
                         if (isCsrfRejection(xhr.status, parsed.error || '')) {
                             err.isCsrfRejection = true;
@@ -630,18 +776,52 @@ export function useUpload(state, utils) {
                 xhr.send(formData);
             });
 
-            // Refresh the token right before sending, and retry exactly once
-            // with another fresh token if the server still rejects it —
-            // mirroring what the fetch interceptor in csrf-refresh.js does
-            // for non-XHR requests.
             let data;
-            try {
-                data = await sendUpload(await getUploadCsrfToken());
-            } catch (uploadError) {
-                if (!uploadError.isCsrfRejection) throw uploadError;
-                console.warn(`[Upload] CSRF rejection for ${fileItem.file.name}; refreshing token and retrying once.`);
-                fileItem.progress = 5;
-                data = await sendUpload(await getUploadCsrfToken());
+            if (sliced) {
+                data = await uploadFileInSlices(fileItem.file, formData, {
+                    onProgress: (fraction) => {
+                        fileItem.progress = Math.round(5 + fraction * 85);
+                        fileItem.serverProcessing = fraction >= 1;
+                    },
+                    onXhr: (xhr) => { fileItem._xhr = xhr; },
+                });
+            } else {
+                // Refresh the token right before sending, and retry exactly once
+                // with another fresh token if the server still rejects it —
+                // mirroring what the fetch interceptor in csrf-refresh.js does
+                // for non-XHR requests.
+                try {
+                    data = await sendUpload(await getUploadCsrfToken());
+                } catch (uploadError) {
+                    if (!uploadError.isCsrfRejection) throw uploadError;
+                    console.warn(`[Upload] CSRF rejection for ${fileItem.file.name}; refreshing token and retrying once.`);
+                    fileItem.progress = 5;
+                    data = await sendUpload(await getUploadCsrfToken());
+                }
+            }
+
+            // One part of a join is stored; the part that completes the group
+            // gets the recording back.
+            if (data.join_pending) {
+                // Stays active until the rest of its join arrives.
+                fileItem.status = 'pending';
+                fileItem.progress = 100;
+                fileItem.serverProcessing = false;
+                fileItem.joinWaiting = { received: data.received, total: data.total };
+                return;
+            }
+            if (fileItem.join) {
+                // From here one entry stands for the joined recording.
+                const group = fileItem.join.group;
+                uploadQueue.value = uploadQueue.value.filter(item =>
+                    item === fileItem || !(item.join && item.join.group === group));
+                fileItem.displayName = data.title || fileItem.displayName;
+                if (recordings.value.some(r => r.id === data.id)) {
+                    fileItem.status = 'pending';
+                    fileItem.recordingId = data.id;
+                    fileItem.progress = 100;
+                    return;
+                }
             }
 
             // Upload succeeded - recording is now on the server
@@ -661,9 +841,13 @@ export function useUpload(state, utils) {
             // #287(b)): the audio is on the server. Only do this for queue
             // items that came from an in-app recording, to avoid touching the
             // session for file-drag-drop uploads that never wrote one.
+            //
+            // Only the session this recording was saved under is cleared: the
+            // upload can finish after the user has started the next recording,
+            // whose crash-recovery copy must survive (#407).
             if (fileItem.fromInProgressRecording) {
                 try {
-                    await RecordingDB.clearRecordingSession();
+                    await RecordingDB.clearRecordingSessionIfStartedAt(fileItem.recordingSessionStartTime);
                 } catch (dbError) {
                     console.warn('[Upload] Failed to clear recording session after successful upload:', dbError);
                 }
@@ -699,7 +883,11 @@ export function useUpload(state, utils) {
             // audio.js's recording-stop path) so bulk drag-drop
             // uploads of many files still leave the user wherever
             // they were.
-            if (fileItem.fromInProgressRecording) {
+            //
+            // Not while the next recording is under way (#407): the upload can
+            // finish minutes after the user started recording again, and
+            // switching views then took them off the recorder.
+            if (fileItem.fromInProgressRecording && !recorderInUse(isRecording, currentView)) {
                 selectedRecording.value = data;
                 currentView.value = 'detail';
                 if (showUploadModal) showUploadModal.value = false;
@@ -720,10 +908,21 @@ export function useUpload(state, utils) {
             }
 
         } catch (error) {
+            if (fileItem.joinCancelled) {
+                // Stopped because another part of its join failed.
+                fileItem.status = 'failed';
+                return;
+            }
             console.error(`Upload Error for ${fileItem.file.name} (Client ID: ${fileItem.clientId}):`, error);
             fileItem.status = 'failed';
             fileItem.error = error.message;
             fileItem.progress = 0;
+            if (fileItem.join) {
+                const message = t('upload.joinFailed', { name: fileItem.file.name });
+                await failJoinGroup(fileItem, message);
+                setGlobalError(`${message} ${error.message}`);
+                return;
+            }
 
             // Show friendly error message
             const friendlyErr = getFriendlyError(error.message, t);
@@ -1028,9 +1227,13 @@ export function useUpload(state, utils) {
             processingProgress.value = 100;
             processingMessage.value = t('incognito.recordingReady');
 
-            // Auto-select the incognito recording and switch to detail view
-            selectedRecording.value = incognitoData;
-            currentView.value = 'detail';
+            // Auto-select the incognito recording and switch to detail view,
+            // unless the next recording is already under way (#407); it stays
+            // available from the incognito entry in the sidebar.
+            if (!recorderInUse(isRecording, currentView)) {
+                selectedRecording.value = incognitoData;
+                currentView.value = 'detail';
+            }
             // Dismiss the upload modal if it was still open behind the
             // success transition.
             if (showUploadModal) showUploadModal.value = false;
@@ -1198,6 +1401,19 @@ export function useUpload(state, utils) {
     };
 
     return {
+        // Join several files into one recording
+        joinMode,
+        joinTitle,
+        joinAvailable,
+        joinActive,
+        joinTotalDuration,
+        joinHasVideo,
+        joinDragClientId,
+        setJoinMode,
+        moveJoinItem,
+        handleJoinDragStart,
+        handleJoinDrop,
+        handleJoinDragEnd,
         resurfaceFailedUploads,
         handleDragOver,
         handleDragLeave,
@@ -1208,6 +1424,8 @@ export function useUpload(state, utils) {
         cancelWaitingFile,
         clearCompletedUploads,
         startUpload,
+        startUploadAndClose,
+        cancelPendingUploadClose,
         startProcessingQueue,
         resetCurrentFileProcessingState,
         startStatusPolling,

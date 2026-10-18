@@ -102,26 +102,42 @@ llm_timeout = httpx.Timeout(
 )
 
 
+def _gpt5_mode_forced(env_var="GPT5_FORCE_MODE"):
+    """Whether GPT-5 parameter handling is forced on via environment variable.
+
+    The autodetection requires api.openai.com in the base URL, which misses
+    GPT-5 models served through Azure AI Foundry or other gateways (#367).
+    """
+    return str(os.environ.get(env_var, "")).strip().lower() in ("true", "1", "yes")
+
+
 def get_chat_config():
     """
     Get chat model configuration, falling back to TEXT_MODEL if not set.
 
     Returns a dict with api_key, base_url, model_name, and GPT-5 settings.
+    A dedicated chat model needs CHAT_MODEL_NAME and either its own key or
+    its own base URL; a local server often needs no key at all (#403).
     """
-    if CHAT_MODEL_API_KEY and CHAT_MODEL_NAME:
+    if CHAT_MODEL_NAME and (CHAT_MODEL_API_KEY or CHAT_MODEL_BASE_URL):
         return {
-            'api_key': CHAT_MODEL_API_KEY,
+            # The text model's key goes only to the text model's server.
+            'api_key': CHAT_MODEL_API_KEY or (TEXT_MODEL_API_KEY if (CHAT_MODEL_BASE_URL or TEXT_MODEL_BASE_URL) == TEXT_MODEL_BASE_URL else None),
             'base_url': CHAT_MODEL_BASE_URL or TEXT_MODEL_BASE_URL,
             'model_name': CHAT_MODEL_NAME,
             'gpt5_reasoning_effort': CHAT_GPT5_REASONING_EFFORT or os.environ.get("GPT5_REASONING_EFFORT", "medium"),
-            'gpt5_verbosity': CHAT_GPT5_VERBOSITY or os.environ.get("GPT5_VERBOSITY", "medium")
+            'gpt5_verbosity': CHAT_GPT5_VERBOSITY or os.environ.get("GPT5_VERBOSITY", "medium"),
+            # A separate chat model does not inherit GPT5_FORCE_MODE: it may
+            # be a different (non-GPT-5) model than the main text model.
+            'gpt5_force': _gpt5_mode_forced("CHAT_GPT5_FORCE_MODE"),
         }
     return {
         'api_key': TEXT_MODEL_API_KEY,
         'base_url': TEXT_MODEL_BASE_URL,
         'model_name': TEXT_MODEL_NAME,
         'gpt5_reasoning_effort': os.environ.get("GPT5_REASONING_EFFORT", "medium"),
-        'gpt5_verbosity': os.environ.get("GPT5_VERBOSITY", "medium")
+        'gpt5_verbosity': os.environ.get("GPT5_VERBOSITY", "medium"),
+        'gpt5_force': _gpt5_mode_forced(),
     }
 
 
@@ -137,8 +153,15 @@ http_client_no_proxy = httpx.Client(
     headers=app_headers
 )
 
-# Create client with placeholder key if not provided (allows app to start)
+# A language model is configured when it has a key or its server address was
+# set explicitly; a local server often needs no key (#403). Without either,
+# no client is created and nothing is sent: the default address is a hosted
+# service, and a transcript must never go there unasked.
+TEXT_MODEL_CONFIGURED = bool(TEXT_MODEL_API_KEY) or bool(os.environ.get("TEXT_MODEL_BASE_URL", "").split('#')[0].strip())
+
 try:
+    if not TEXT_MODEL_CONFIGURED:
+        raise RuntimeError("no text model configured (set TEXT_MODEL_BASE_URL, and TEXT_MODEL_API_KEY for a hosted service)")
     api_key = TEXT_MODEL_API_KEY or "not-needed"
     client = OpenAI(
         api_key=api_key,
@@ -157,24 +180,29 @@ try:
 except Exception as client_init_e:
     client = None
 
-# Create chat client (may be same as main client if no separate config)
-chat_client = None
-try:
+def _build_chat_client():
+    """The chat client: the main client, or a dedicated one when the chat
+    model has its own key or server. The key is optional, since a local
+    server often runs without one (#403)."""
     chat_config = get_chat_config()
-    if chat_config['api_key']:
-        if CHAT_MODEL_API_KEY and CHAT_MODEL_API_KEY != TEXT_MODEL_API_KEY:
-            # Separate chat configuration - create dedicated client
-            chat_client = OpenAI(
-                api_key=chat_config['api_key'],
-                base_url=chat_config['base_url'],
-                http_client=http_client_no_proxy,
-                timeout=llm_timeout,
-                max_retries=LLM_MAX_RETRIES,
-            )
-            logger.info(f"Separate chat client initialized: {chat_config['base_url']} / {chat_config['model_name']}")
-        else:
-            # Use same client as main LLM
-            chat_client = client
+    if (chat_config['api_key'], chat_config['base_url']) == (TEXT_MODEL_API_KEY, TEXT_MODEL_BASE_URL):
+        return client
+    if not (CHAT_MODEL_API_KEY or CHAT_MODEL_BASE_URL or TEXT_MODEL_CONFIGURED):
+        return None
+    dedicated = OpenAI(
+        api_key=chat_config['api_key'] or "not-needed",
+        base_url=chat_config['base_url'],
+        http_client=http_client_no_proxy,
+        timeout=llm_timeout,
+        max_retries=LLM_MAX_RETRIES,
+    )
+    logger.info(f"Separate chat client initialized: {chat_config['base_url']} / {chat_config['model_name']}")
+    return dedicated
+
+
+# Create chat client (may be same as main client if no separate config)
+try:
+    chat_client = _build_chat_client()
 except Exception as chat_client_init_e:
     logger.warning(f"Failed to initialize chat client, falling back to main client: {chat_client_init_e}")
     chat_client = client
@@ -226,10 +254,7 @@ def call_llm_completion(messages, temperature=0.7, response_format=None, stream=
         OpenAI completion object or generator (if streaming)
     """
     if not client:
-        raise ValueError("LLM client not initialized")
-
-    if not TEXT_MODEL_API_KEY:
-        raise ValueError("TEXT_MODEL_API_KEY not configured")
+        raise ValueError("No text model is configured. Set TEXT_MODEL_BASE_URL, and TEXT_MODEL_API_KEY for a hosted service.")
 
     # Check budget before making the call
     if user_id and operation_type:
@@ -247,8 +272,9 @@ def call_llm_completion(messages, temperature=0.7, response_format=None, stream=
             logger.warning(f"Budget check failed for user {user_id}: {e}")
 
     try:
-        # Check if we're using GPT-5 with OpenAI API
-        using_gpt5 = is_gpt5_model(TEXT_MODEL_NAME) and is_using_openai_api()
+        # Check if we're using GPT-5 with OpenAI API (or forced via env for
+        # Azure AI Foundry and other gateways the URL check can't detect)
+        using_gpt5 = _gpt5_mode_forced() or (is_gpt5_model(TEXT_MODEL_NAME) and is_using_openai_api())
 
         completion_args = {
             "model": TEXT_MODEL_NAME,
@@ -351,7 +377,7 @@ def call_llm_completion(messages, temperature=0.7, response_format=None, stream=
 
 
 def call_chat_completion(messages, temperature=0.7, response_format=None, stream=False, max_tokens=None,
-                         user_id=None, operation_type=None):
+                         user_id=None, operation_type=None, tools=None, tool_choice=None):
     """
     Chat-specific LLM completion function. Uses dedicated chat model if configured,
     otherwise falls back to standard TEXT_MODEL configuration.
@@ -364,6 +390,9 @@ def call_chat_completion(messages, temperature=0.7, response_format=None, stream
         max_tokens: Optional maximum tokens to generate
         user_id: Optional user ID for token tracking and budget enforcement
         operation_type: Optional operation type for token tracking (e.g., 'chat')
+        tools: Optional list of tool schemas (OpenAI function-calling format).
+            Only sent when provided, so non-agent call sites are unaffected.
+        tool_choice: Optional tool_choice value, passed through when tools are set.
 
     Returns:
         OpenAI completion object or generator (if streaming)
@@ -396,8 +425,9 @@ def call_chat_completion(messages, temperature=0.7, response_format=None, stream
         model_name = chat_config['model_name']
         base_url = chat_config['base_url'] or ''
 
-        # Check if we're using GPT-5 with OpenAI API
-        using_gpt5 = is_gpt5_model(model_name) and 'api.openai.com' in base_url
+        # Check if we're using GPT-5 with OpenAI API (or forced via env for
+        # Azure AI Foundry and other gateways the URL check can't detect)
+        using_gpt5 = chat_config['gpt5_force'] or (is_gpt5_model(model_name) and 'api.openai.com' in base_url)
 
         completion_args = {
             "model": model_name,
@@ -425,6 +455,11 @@ def call_chat_completion(messages, temperature=0.7, response_format=None, stream
 
         if response_format:
             completion_args["response_format"] = response_format
+
+        if tools:
+            completion_args["tools"] = tools
+            if tool_choice:
+                completion_args["tool_choice"] = tool_choice
 
         # Visibility: surface the resolved budget per call so admins can
         # confirm CHAT_MAX_TOKENS or per-call overrides took effect.

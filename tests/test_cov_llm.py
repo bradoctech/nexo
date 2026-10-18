@@ -183,15 +183,16 @@ def test_get_chat_config_base_url_falls_back_to_text(monkeypatch):
 
 def test_call_llm_completion_no_client(monkeypatch):
     monkeypatch.setattr(llm, "client", None)
-    with pytest.raises(ValueError, match="not initialized"):
+    with pytest.raises(ValueError, match="No text model is configured"):
         call_llm_completion([{"role": "user", "content": "hi"}])
 
 
-def test_call_llm_completion_no_api_key(monkeypatch):
-    install_client(monkeypatch)
+def test_call_llm_completion_without_api_key(monkeypatch):
+    # A local server needs no key (#403): the call goes through.
+    install_client(monkeypatch, return_value=make_completion("local"))
     monkeypatch.setattr(llm, "TEXT_MODEL_API_KEY", None)
-    with pytest.raises(ValueError, match="TEXT_MODEL_API_KEY"):
-        call_llm_completion([{"role": "user", "content": "hi"}])
+    resp = call_llm_completion([{"role": "user", "content": "hi"}])
+    assert resp.choices[0].message.content == "local"
 
 
 # ===========================================================================

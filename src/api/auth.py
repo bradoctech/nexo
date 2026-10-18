@@ -28,12 +28,14 @@ from src.auth.sso import (
     create_or_update_sso_user,
     is_domain_allowed,
     link_sso_to_existing_user,
+    resolve_userinfo,
     update_user_profile_from_claims,
 )
 from src.services.email import (
     is_email_verification_enabled,
     is_email_verification_required,
     is_smtp_configured,
+    can_email_user,
     send_verification_email,
     send_password_reset_email,
     verify_email_token,
@@ -146,7 +148,35 @@ def is_registration_domain_allowed(email: str) -> bool:
     return domain in allowed
 
 
+def _email_notifications_available(user) -> bool:
+    """Whether to offer this user the completion-email toggle (#386).
+
+    Offering a switch that cannot do anything is worse than hiding it, so the
+    account page asks the same question the sender will ask: is SMTP set up,
+    and is this user's address one we can actually deliver to.
+    """
+    return can_email_user(user)
+
+
 # --- Routes ---
+
+@auth_bp.route('/api/user/timezone', methods=['POST'])
+@login_required
+def record_timezone():
+    """Save the browser's timezone for a user in 'auto' mode (#412).
+
+    Sent by static/js/timezone-sync.js once per browser session. A user who
+    chose a zone in Account settings keeps it.
+    """
+    from src.utils.timezones import record_browser_timezone, user_timezone, MODE_AUTO
+    data = request.get_json(silent=True) or {}
+    if record_browser_timezone(current_user, data.get('timezone')):
+        db.session.commit()
+    return jsonify({
+        'timezone': user_timezone(current_user),
+        'mode': current_user.timezone_mode or MODE_AUTO,
+    })
+
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
 @rate_limit("10 per minute")
@@ -181,6 +211,8 @@ def register():
             password=hashed_password,
             email_verified=email_verified
         )
+        from src.services.storage_quota import default_quota_mb
+        user.storage_quota_mb = default_quota_mb()
         db.session.add(user)
         db.session.commit()
 
@@ -290,7 +322,7 @@ def sso_callback():
 
     try:
         token = oauth.sso.authorize_access_token()
-        userinfo = token.get('userinfo') or oauth.sso.userinfo()
+        userinfo = resolve_userinfo(oauth, token)
     except Exception as e:
         current_app.logger.warning(f"SSO callback error: {e}")
         flash('SSO login failed. Please try again.', 'danger')
@@ -582,6 +614,56 @@ def reset_password(token):
     return render_template('auth/reset_password.html', title='Reset Password', token=token)
 
 
+def _storage_usage(user):
+    try:
+        from src.services.storage_quota import usage
+        return usage(user)
+    except Exception as e:
+        current_app.logger.warning(f"Could not read storage usage for user {user.id}: {e}")
+        return None
+
+
+def _usage_limits(user):
+    """AI tokens and transcription minutes this month, and storage, each
+    against its limit when one is set, for the Account page (#413)."""
+    def size(n):
+        return f"{n / 1073741824:.1f} GB" if n >= 1073741824 else f"{n / 1048576:.1f} MB"
+
+    def row(key, label_key, icon, used, limit, fmt):
+        pct = round(used / limit * 100, 1) if limit else None
+        return {'key': key, 'label_key': label_key, 'icon': icon, 'used': fmt(used),
+                'limit': fmt(limit) if limit else None, 'percentage': pct}
+
+    rows = []
+    try:
+        from src.services.token_tracking import token_tracker
+        rows.append(row('tokens', 'account.aiTokensMonth', 'fa-coins',
+                        int(token_tracker.get_monthly_usage(user.id) or 0), user.monthly_token_budget,
+                        lambda n: f"{int(n):,}"))
+    except Exception as e:
+        current_app.logger.warning(f"Could not read token usage for user {user.id}: {e}")
+    try:
+        from src.services.transcription_tracking import transcription_tracker
+        seconds = int(transcription_tracker.get_monthly_usage(user.id) or 0)
+        budget = user.monthly_transcription_budget
+        rows.append(row('transcription', 'account.transcriptionMonth', 'fa-microphone',
+                        seconds // 60, (budget // 60) if budget else None, lambda n: f"{int(n):,} min"))
+    except Exception as e:
+        current_app.logger.warning(f"Could not read transcription usage for user {user.id}: {e}")
+    storage = _storage_usage(user)
+    if storage:
+        rows.append(row('storage', 'account.storage', 'fa-hdd', storage['used_bytes'], storage['quota_bytes'], size))
+    return rows
+
+
+@auth_bp.route('/api/account/storage', methods=['GET'])
+@login_required
+def account_storage():
+    """The signed-in user's storage use and quota (#413)."""
+    from src.services.storage_quota import usage
+    return jsonify(usage(current_user))
+
+
 @auth_bp.route('/account', methods=['GET', 'POST'])
 @login_required
 def account():
@@ -608,6 +690,12 @@ def account():
         elif 'preferences_form' in request.form:
             current_user.show_timestamps_simple_view = 'show_timestamps_simple_view' in request.form
             current_user.editor_autosave = 'editor_autosave' in request.form
+            # Only honour the notification toggle when the form actually
+            # rendered it. The checkbox is hidden when Speakr cannot mail this
+            # user, and an absent checkbox must not silently clear a
+            # preference they set while SMTP was working.
+            if 'email_notifications_shown' in request.form:
+                current_user.notify_email_on_completion = 'notify_email_on_completion' in request.form
             # Audio player position — only update if the field is
             # actually present in the submission. The Preferences tab
             # (which doesn't expose the radio) submits without this
@@ -627,6 +715,22 @@ def account():
             from src.utils.language import normalize_language_code
             current_user.transcription_language = normalize_language_code(transcription_lang)
             current_user.output_language = output_lang if output_lang else None
+
+            # Timezone for generated titles (#412). Gated on the field being
+            # present so tabs that submit 'preferences_form' without it leave the
+            # setting alone. 'auto' keeps the detected zone and resumes updating
+            # it from the browser; a zone name fixes it.
+            if 'timezone' in request.form:
+                from src.utils.timezones import is_valid_timezone, MODE_AUTO, MODE_FIXED
+                tz_value = (request.form.get('timezone') or '').strip()
+                if tz_value == MODE_AUTO or not tz_value:
+                    current_user.timezone_mode = MODE_AUTO
+                    detected = (request.form.get('detected_timezone') or '').strip()
+                    if is_valid_timezone(detected):
+                        current_user.timezone = detected
+                elif is_valid_timezone(tz_value):
+                    current_user.timezone_mode = MODE_FIXED
+                    current_user.timezone = tz_value
 
             # Filename date parsing (#342). Gated on the select being present
             # so other tabs that submit 'preferences_form' without this
@@ -654,8 +758,18 @@ def account():
             # Handle custom prompt updates
             summary_prompt_text = request.form.get('summary_prompt')
             current_user.summary_prompt = summary_prompt_text if summary_prompt_text else None
+            # Gated on its own field so a form without it cannot clear it (#400).
+            if 'title_prompt' in request.form:
+                title_prompt_text = (request.form.get('title_prompt') or '').strip()
+                current_user.title_prompt = title_prompt_text or None
             # Handle event extraction setting
             current_user.extract_events = 'extract_events' in request.form
+            # Inquire content availability (agentic inquire). Gated on the
+            # marker field so form submissions without this section cannot
+            # clobber the settings (same reasoning as audio_player_position).
+            if 'inquire_privacy_section' in request.form:
+                current_user.inquire_allow_summaries = 'inquire_allow_summaries' in request.form
+                current_user.inquire_allow_notes = 'inquire_allow_notes' in request.form
             # Handle transcription hints
             hotwords = request.form.get('transcription_hotwords')
             current_user.transcription_hotwords = hotwords if hotwords else None
@@ -692,10 +806,6 @@ def account():
             # Empty string = use the default template (recording_{{id}})
             current_user.export_filename_template = template_value if template_value else None
 
-        # Only update diarize if it's not locked by env var
-        if 'ASR_DIARIZE' not in os.environ:
-            current_user.diarize = 'diarize' in request.form
-
         db.session.commit()
 
         # Return JSON response for AJAX requests
@@ -720,8 +830,10 @@ def account():
         from src.config.prompts import DEFAULT_SUMMARY_PROMPT
         default_summary_prompt_text = DEFAULT_SUMMARY_PROMPT
 
-    asr_diarize_locked = 'ASR_DIARIZE' in os.environ
-    ASR_DIARIZE = os.environ.get('ASR_DIARIZE', 'false').lower() == 'true'
+    # The title instructions a user gets when they leave their own blank.
+    from src.tasks.processing import _user_title_instructions
+    default_title_prompt_text = _user_title_instructions(None)[0]
+
     USE_ASR_ENDPOINT = os.environ.get('USE_ASR_ENDPOINT', 'false').lower() == 'true'
     USE_NEW_TRANSCRIPTION_ARCHITECTURE = os.environ.get('USE_NEW_TRANSCRIPTION_ARCHITECTURE', 'true').lower() == 'true'
     ENABLE_AUTO_DELETION = os.environ.get('ENABLE_AUTO_DELETION', 'false').lower() == 'true'
@@ -795,9 +907,15 @@ def account():
     # Get user's UI language preference
     user_language = current_user.ui_language if current_user.ui_language else 'en'
 
+    from src.services.inquire_agent import get_availability as _get_inquire_availability
+    _inquire_availability = _get_inquire_availability(current_user)
+
     return render_template('account.html',
                            title='Account',
+                           storage_usage=_storage_usage(current_user),
+                           usage_limits=_usage_limits(current_user),
                            default_summary_prompt_text=default_summary_prompt_text,
+                           default_title_prompt_text=default_title_prompt_text,
                            use_asr_endpoint=USE_ASR_ENDPOINT,
                            connector_supports_diarization=connector_supports_diarization,
                            connector_supports_hotwords=connector_supports_hotwords,
@@ -805,8 +923,6 @@ def account():
                            enable_auto_deletion=ENABLE_AUTO_DELETION,
                            enable_internal_sharing=ENABLE_INTERNAL_SHARING,
                            user_admin_groups=user_admin_groups,
-                           asr_diarize_locked=asr_diarize_locked,
-                           asr_diarize_env_value=ASR_DIARIZE,
                            is_team_admin=is_team_admin,
                            sso_enabled=sso_enabled,
                            sso_provider_name=sso_config.get('provider_name', 'SSO'),
@@ -815,11 +931,14 @@ def account():
                            has_password=bool(current_user.password),
                            password_login_disabled=password_login_disabled,
                            speaker_embeddings_enabled=connector_supports_speaker_embeddings,
+                           email_notifications_available=_email_notifications_available(current_user),
                            contextual_labelling_available=contextual_labelling_available,
                            auto_speaker_labelling=current_user.auto_speaker_labelling,
                            auto_speaker_labelling_threshold=current_user.auto_speaker_labelling_threshold or 'medium',
                            admin_disabled_auto_summarization=admin_disabled_auto_summarization,
                            auto_summarization=current_user.auto_summarization if current_user.auto_summarization is not None else True,
+                           inquire_allow_summaries=_inquire_availability['summaries'],
+                           inquire_allow_notes=_inquire_availability['notes'],
                            user_language=user_language,
                            enable_auto_export=ENABLE_AUTO_EXPORT,
                            enable_auto_processing=os.environ.get('ENABLE_AUTO_PROCESSING', 'false').lower() == 'true')

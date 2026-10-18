@@ -1,24 +1,7 @@
-/* App logo wrapper — gives the colourful Speakr icon a quiet, theme-
-   appropriate outline that sits FLUSH with the visible icon edge (the
-   PNGs are now trim-cropped so there's no transparent margin to fight
-   with) wherever the icon appears: top-left header, page-header, inquire
-   header, share view, settings About page.
-
-   Uses box-shadow rather than border + padding because:
-     - box-shadow doesn't change the image's box dimensions, so every
-       existing utility size (w-7 h-7, h-12 w-12, etc.) keeps producing
-       the same footprint — no shrinkage from box-sizing math.
-     - The two layered shadows give a hairline outline (first shadow)
-       PLUS a soft drop (second) without two stacked elements.
-   border-radius: 22% matches the iOS-style rounded-square corner of the
-   Speakr icon so the outline traces the icon's actual shape rather than
-   cutting across it. */
+/* The paper-fold S has a transparent background and stands on its own:
+   no frame, no tint, the same apricot in every theme. */
 .app-logo {
-    border-radius: 22%;
-    box-shadow: 0 0 0 1px var(--border-secondary), 0 1px 2px rgba(0, 0, 0, 0.08);
-}
-.dark .app-logo {
-    box-shadow: 0 0 0 1px var(--border-secondary), 0 1px 2px rgba(0, 0, 0, 0.3);
+    object-fit: contain;
 }
 
 /* ============================================================================
@@ -587,9 +570,35 @@ html.dark {
 .btn--icon:not(.btn--primary):not(.btn--danger):not(.btn--ghost):not(.btn--quiet) {
     color: var(--text-muted);
 }
-.btn--icon:not(.btn--primary):not(.btn--danger):not(.btn--ghost):not(.btn--quiet):hover:not(:disabled) {
+/* Hover tint only where a pointer really hovers: a touch screen keeps
+   :hover after a tap, which left a grey box on the last button tapped. */
+@media (hover: hover) {
+    .btn--icon:not(.btn--primary):not(.btn--danger):not(.btn--ghost):not(.btn--quiet):hover:not(:disabled) {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+}
+.btn--icon:not(.btn--primary):not(.btn--danger):not(.btn--ghost):not(.btn--quiet):active:not(:disabled) {
     background: var(--bg-tertiary);
     color: var(--text-primary);
+}
+
+/* Page header buttons: one height for icon and labelled buttons, and on
+   phones (labels hidden) one square size for all of them. */
+.btn.header-action {
+    min-height: 36px;
+}
+.btn.header-action.btn--icon {
+    width: 36px;
+}
+@media (max-width: 639px) {
+    .btn.header-action,
+    .btn.header-action.btn--icon {
+        width: 40px;
+        min-height: 40px;
+        padding: 0;
+        justify-content: center;
+    }
 }
 .btn--icon.btn--lg {
     width: 44px;

@@ -14,6 +14,10 @@ Setting a character limit (like 50,000 characters) creates a ceiling on API cons
 
 The sweet spot depends on your use case. For typical meetings under an hour, 50,000 characters usually captures everything. For longer sessions, you might increase this limit or train users to split recordings. Monitor your API costs and user feedback to find the right balance.
 
+## Default Storage Quota
+
+**`default_storage_quota_mb`** (default 0, no limit) is the storage quota given to accounts created after it is set, by an administrator, by registration or by SSO. The quota of an existing account does not change; it is set per user in Edit User. See [Storage Quotas](user-management.md#storage-quotas).
+
 ## Maximum File Size
 
 Two separate caps apply depending on file type:
@@ -36,6 +40,10 @@ The ASR timeout determines how long Speakr will wait for advanced transcription 
 Setting this too low causes longer recordings to fail even when the transcription service is working normally. The recording appears stuck in processing, then eventually fails, frustrating users who must retry or give up. Setting it too high ties up system resources waiting for services that might have actually failed.
 
 Your optimal timeout depends on your transcription service's performance and your users' recording lengths. Monitor processing times for successful transcriptions and set the timeout comfortably above your longest normal processing time. If you regularly process multi-hour recordings, you might need 3,600 seconds or more.
+
+## Default Timezone
+
+Dates in generated titles (naming-template dates and default titles), in exported files and in the dates given to the AI are written in each user's timezone. A user's timezone is reported by their browser or chosen in Account → Preferences. The default timezone is used for users without one, for example accounts that only use the API or the watch folder. On a new installation it is UTC; if the `TIMEZONE` variable from earlier versions is set, its value is used as the initial default. Stored dates and API responses are always UTC.
 
 ## Recording Disclaimer
 
@@ -126,6 +134,12 @@ Processing backlogs might indicate your timeout is too high. If the system waits
 
 Beyond the UI-configurable settings above, several environment variables in your `.env` file control fundamental system behaviors. These require instance restart to take effect.
 
+### Interface Customization
+
+**HELP_CENTER_URL**: Adds a Help Center link to the user menu (on both the main app and the account/admin pages), opening in a new tab. Point it at your own FAQ, tutorial, or intranet page so users find your organization's guidance instead of the technical documentation. Unset by default (no link shown).
+
+**HELP_CENTER_LABEL**: Optional custom label for the Help Center link. When unset, a localized "Help Center" label is used.
+
 ### Collaboration & Sharing
 
 **ENABLE_INTERNAL_SHARING**: Controls user-to-user sharing capabilities. Set to `true` to enable internal sharing features, allowing users to share recordings with specific colleagues. Required for group functionality. Default: `false`.
@@ -159,6 +173,12 @@ Speakr uses separate job queues for transcription and summarization to prevent s
 **JOB_MAX_RETRIES**: How many times a failed job will be retried before being marked as failed. Default: `3`.
 
 Jobs are persisted to the database and survive application restarts. If Speakr restarts while jobs are processing, they automatically resume from where they left off.
+
+**These are threads, not processes.** `JOB_QUEUE_WORKERS` controls how many transcriptions run at once inside the one process that owns the queue, which is the right shape for this work: a worker spends its time waiting on an ASR endpoint or an LLM API rather than using CPU, so more threads means more concurrency without more memory.
+
+They are a separate thing from gunicorn's `--workers`, which controls how many processes serve HTTP. The container runs three of those by default. Because Speakr's startup code runs in every process that imports the app, background work is claimed by exactly one of them: the others serve requests and enqueue jobs normally, but run no workers, no watch-folder monitor and no schedulers. Before v0.10.6-alpha every process ran its own copy, which could send the same recording to the ASR service once per gunicorn worker. Raising `--workers` for more request capacity is safe.
+
+If the process that owns the background work is recycled or killed, the replacement claims it on startup and any job that was interrupted is recovered.
 
 ### Folders Feature
 

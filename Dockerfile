@@ -44,10 +44,10 @@ RUN pip install --no-cache-dir requests && \
 ###############################################################################
 FROM python:3.11-slim AS ffmpeg-stage
 
-ARG BTBN_TAG=autobuild-2026-08-06-13-39
-ARG FFMPEG_VER=n8.1.2-34-g9b6c8969e0
-ARG FFMPEG_SHA256_amd64=045a114c3b9c788008ac9f53eabca79e3c90a4b3c40174df1952ba85988ebc86
-ARG FFMPEG_SHA256_arm64=42bbd4b0195181d31f153b73442ce3b4d8c35a301f940f9ac1535541a2fbeffb
+ARG BTBN_TAG=autobuild-2026-09-28-13-06
+ARG FFMPEG_VER=n8.1.3-6-gff48edd8b2
+ARG FFMPEG_SHA256_amd64=591f8541e5d041cc3637a74de3bd9b4d020e9a7b7e891e590e440935a4933138
+ARG FFMPEG_SHA256_arm64=93201f43109ab8fbef6858d78cb8061b72b074c5cdf9cb4cad4feba18a6b7c4b
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget xz-utils \
     && rm -rf /var/lib/apt/lists/* \
@@ -67,7 +67,39 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget xz-utils \
     && rm -rf /tmp/ff.tar.xz /tmp/ffmpeg-dir
 
 ###############################################################################
-# Stage 3: Runtime — lean final image with only what's needed
+# Stage 3: CSS - compile static/css/tailwind.css with the standalone Tailwind
+# CLI (no Node.js). Only the class names found in templates, static/js and src
+# are compiled (tailwind.config.js). The CLI release is pinned and each arch
+# binary's SHA-256 is verified; scripts/build_css.sh holds the same pin for
+# local builds, and both are updated together.
+###############################################################################
+FROM python:3.11-slim AS css-stage
+
+ARG TAILWIND_VERSION=v3.4.19
+ARG TAILWIND_SHA256_amd64=4af3198c015616ea7d6617974ec3d70d987ecc00c1ca8463b0a30fd65cc7c06e
+ARG TAILWIND_SHA256_arm64=e5b2d27694daa80cc52ec29553ba2c6bd43d86bd51a9d633ed24058b9c05a676
+
+RUN apt-get update && apt-get install -y --no-install-recommends wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && case "$(dpkg --print-architecture)" in \
+         amd64) TW_ARCH=x64;   SHA256="${TAILWIND_SHA256_amd64}" ;; \
+         arm64) TW_ARCH=arm64; SHA256="${TAILWIND_SHA256_arm64}" ;; \
+         *) echo "Unsupported architecture: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+       esac \
+    && wget -q "https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-linux-${TW_ARCH}" -O /usr/local/bin/tailwindcss \
+    && echo "${SHA256}  /usr/local/bin/tailwindcss" | sha256sum -c - \
+    && chmod +x /usr/local/bin/tailwindcss
+
+WORKDIR /build
+COPY tailwind.config.js ./
+COPY static/css/tailwind.input.css static/css/
+COPY templates templates
+COPY static/js static/js
+COPY src src
+RUN tailwindcss -c tailwind.config.js -i static/css/tailwind.input.css -o static/css/tailwind.css --minify
+
+###############################################################################
+# Stage 4: Runtime — lean final image with only what's needed
 ###############################################################################
 FROM python:3.11-slim
 
@@ -86,6 +118,9 @@ COPY --from=builder /app/static/vendor /app/static/vendor
 # Copy application code
 COPY . .
 
+# Compiled Tailwind stylesheet (not in git; see the css-stage above)
+COPY --from=css-stage /build/static/css/tailwind.css /app/static/css/tailwind.css
+
 # Create necessary directories
 RUN mkdir -p /data/uploads /data/instance && chmod 755 /data/uploads /data/instance
 
@@ -103,4 +138,9 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 EXPOSE 8899
 
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["gunicorn", "--workers", "3", "--bind", "0.0.0.0:8899", "--timeout", "600", "src.app:app"]
+# Threaded workers: streaming responses (chat/Inquire SSE, audio/video range
+# requests) hold a request slot for their duration; with sync workers 3 such
+# streams made the whole app unresponsive (#374). gthread gives 3x8 = 24
+# concurrent requests; the app is thread-tolerant (background job threads,
+# SQLite WAL) and streams are I/O-bound.
+CMD ["gunicorn", "--workers", "3", "--worker-class", "gthread", "--threads", "8", "--bind", "0.0.0.0:8899", "--timeout", "600", "src.app:app"]
