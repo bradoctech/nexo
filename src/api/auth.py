@@ -43,6 +43,7 @@ from src.services.email import (
     can_resend_verification,
     can_resend_password_reset,
 )
+from src.config.app_config import APP_NAME
 
 # Create blueprint
 auth_bp = Blueprint('auth', __name__)
@@ -1095,7 +1096,7 @@ def transcript_templates_guide():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Transcript Templates Guide - Speakr</title>
+        <title>Transcript Templates Guide - {APP_NAME}</title>
         <link rel="stylesheet" href="/static/css/output.css">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
         <style>

@@ -6,16 +6,16 @@ const APP_VERSION = new URLSearchParams(self.location.search).get('v') || 'v5';
 const CACHE_NAME = `Speakr-cache-${APP_VERSION}`;
 const ASSETS_TO_CACHE = [
   '/',
-  '/static/offline.html',
-  '/static/manifest.json',
+  '/offline',
+  '/manifest.json',
   '/static/css/styles.css',
   '/static/css/tailwind.css',
   '/static/js/app.modular.js',
   '/static/js/i18n.js',
   '/static/js/csrf-refresh.js',
-  '/static/img/icon-192x192.png',
-  '/static/img/icon-512x512.png',
-  '/static/img/favicon.ico',
+  '/static/img/icon-192x192-nexo.png',
+  '/static/img/icon-512x512-nexo.png',
+  '/static/img/icon-32x32-nexo.png',
   // Local vendor assets (no external CDN dependencies)
   '/static/vendor/js/vue.global.js',
   '/static/vendor/js/marked.min.js',
@@ -39,14 +39,14 @@ const updateShortcuts = async (lists) => {
         short_name: "New",
         description: "Upload or record new audio",
         url: "/#upload", // Or your direct upload page route
-        icons: [{ src: "/static/img/icon-192x192.png", sizes: "192x192" }]
+        icons: [{ src: "/static/img/icon-192x192-nexo.png", sizes: "192x192" }]
       },
       {
         name: "View Gallery",
         short_name: "Gallery",
         description: "Access your recordings gallery",
         url: "/#gallery", // Or your direct gallery page route
-        icons: [{ src: "/static/img/icon-192x192.png", sizes: "192x192" }]
+        icons: [{ src: "/static/img/icon-192x192-nexo.png", sizes: "192x192" }]
       }
     ];
 
@@ -59,7 +59,7 @@ const updateShortcuts = async (lists) => {
             short_name: list.title.length > 10 ? list.title.substring(0, 9) + '…' : list.title,
             description: `View ${list.title}`,
             url: `/list/${list.id}`, // Example dynamic URL
-            icons: [{ src: "/static/img/icon-192x192.png", sizes: "192x192" }]
+            icons: [{ src: "/static/img/icon-192x192-nexo.png", sizes: "192x192" }]
           };
         }
         return null;
@@ -142,7 +142,7 @@ const networkFirst = async (request) => {
     }
     // For navigation requests, fall back to the offline page if both network and cache fail.
     if (request.mode === 'navigate') {
-      const offlinePage = await caches.match('/static/offline.html');
+      const offlinePage = await caches.match('/offline');
       if (offlinePage) return offlinePage;
     }
     // For other types of requests, or if offline page isn't cached, re-throw or return error.
@@ -152,6 +152,30 @@ const networkFirst = async (request) => {
     });
   }
 };
+
+async function getAppName() {
+  const cachedManifest = await caches.match('/manifest.json');
+  if (cachedManifest) {
+    try {
+      const manifest = await cachedManifest.json();
+      if (manifest.name) return manifest.name;
+    } catch (_) {
+      // A malformed cached manifest should not prevent notifications.
+    }
+  }
+
+  try {
+    const response = await fetch('/manifest.json', { cache: 'no-store' });
+    if (response.ok) {
+      const manifest = await response.json();
+      if (manifest.name) return manifest.name;
+    }
+  } catch (_) {
+    // When completely offline, use the default configured application name.
+  }
+
+  return 'Speakr';
+}
 
 self.addEventListener('install', (event) => {
   self.skipWaiting(); // Activate new service worker immediately
@@ -252,10 +276,10 @@ self.addEventListener('fetch', (event) => {
   // it to (re)register the PWA's share_target (and file_handlers, shortcuts,
   // etc). Cache-first pins whatever manifest was cached at first install —
   // e.g. one from before share_target existed — so the Android share sheet
-  // never gains "Speakr" as a target no matter how many times the manifest
+  // never gains the current application as a target no matter how many times the manifest
   // is updated server-side. Serve it network-first: fresh from the network,
   // falling back to cache only when offline.
-  if (url.pathname === '/static/manifest.json') {
+  if (url.pathname === '/manifest.json') {
     event.respondWith(networkFirst(request));
     return;
   }
@@ -460,12 +484,13 @@ async function syncFailedUploads() {
     }
 
     console.log(`[Service Worker] Found ${failedUploads.length} failed uploads to retry`);
+    const appName = await getAppName();
 
     // Notify that sync started
-    await self.registration.showNotification('Speakr Upload Sync', {
+    await self.registration.showNotification(`${appName} Upload Sync`, {
       body: `Retrying ${failedUploads.length} failed upload(s)...`,
-      icon: '/static/img/icon-192x192.png',
-      badge: '/static/img/icon-192x192.png',
+      icon: '/static/img/icon-192x192-nexo.png',
+      badge: '/static/img/icon-192x192-nexo.png',
       tag: 'upload-sync',
       requireInteraction: false
     });
@@ -501,10 +526,10 @@ async function syncFailedUploads() {
     }
 
     // Show final notification
-    await self.registration.showNotification('Speakr Upload Sync Complete', {
+    await self.registration.showNotification(`${appName} Upload Sync Complete`, {
       body: `${successCount} succeeded, ${failCount} failed`,
-      icon: '/static/img/icon-192x192.png',
-      badge: '/static/img/icon-192x192.png',
+      icon: '/static/img/icon-192x192-nexo.png',
+      badge: '/static/img/icon-192x192-nexo.png',
       tag: 'upload-sync-complete',
       requireInteraction: false
     });
@@ -512,11 +537,12 @@ async function syncFailedUploads() {
     return Promise.resolve();
   } catch (error) {
     console.error('[Service Worker] Failed to sync uploads:', error);
+    const appName = await getAppName();
 
-    await self.registration.showNotification('Speakr Upload Sync Failed', {
+    await self.registration.showNotification(`${appName} Upload Sync Failed`, {
       body: 'Could not sync failed uploads. Will retry later.',
-      icon: '/static/img/icon-192x192.png',
-      badge: '/static/img/icon-192x192.png',
+      icon: '/static/img/icon-192x192-nexo.png',
+      badge: '/static/img/icon-192x192-nexo.png',
       tag: 'upload-sync-error',
       requireInteraction: false
     });
@@ -530,8 +556,8 @@ self.addEventListener('push', (event) => {
   console.log('[Service Worker] Push notification received');
 
   const options = {
-    icon: '/static/img/icon-192x192.png',
-    badge: '/static/img/icon-192x192.png',
+    icon: '/static/img/icon-192x192-nexo.png',
+    badge: '/static/img/icon-192x192-nexo.png',
     vibrate: [200, 100, 200],
     data: {
       dateOfArrival: Date.now(),
@@ -539,23 +565,22 @@ self.addEventListener('push', (event) => {
     }
   };
 
-  if (event.data) {
-    const data = event.data.json();
-    event.waitUntil(
-      self.registration.showNotification(data.title || 'Speakr Notification', {
+  event.waitUntil((async () => {
+    const appName = await getAppName();
+    if (event.data) {
+      const data = event.data.json();
+      await self.registration.showNotification(data.title || `${appName} Notification`, {
         body: data.body || 'You have a new notification',
         ...options,
         data: data
-      })
-    );
-  } else {
-    event.waitUntil(
-      self.registration.showNotification('Speakr Notification', {
+      });
+    } else {
+      await self.registration.showNotification(`${appName} Notification`, {
         body: 'You have a new notification',
         ...options
-      })
-    );
-  }
+      });
+    }
+  })());
 });
 
 // Notification click handler

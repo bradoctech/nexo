@@ -211,8 +211,8 @@ def send_push_notification(user_id, title, body, data=None):
     notification_data = {
         'title': title,
         'body': body,
-        'icon': '/static/img/icon-192x192.png',
-        'badge': '/static/img/icon-192x192.png',
+        'icon': '/static/img/icon-192x192-nexo.png',
+        'badge': '/static/img/icon-192x192-nexo.png',
         'data': data or {}
     }
 

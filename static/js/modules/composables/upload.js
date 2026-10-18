@@ -16,6 +16,15 @@ import {
     newJoinGroupId, isVideoFileName, MAX_JOIN_FILES,
 } from '../utils/upload-join.js';
 
+const defaultRecordingFilename = () => {
+    const name = (window.APP_NAME || 'Speakr')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'speakr';
+    return `${name}-recording-${Date.now()}.webm`;
+};
+
 // Parse error message and return friendly error info
 function getFriendlyError(errorMessage, t) {
     const _t = t || ((key) => key);
@@ -988,7 +997,7 @@ export function useUpload(state, utils) {
                     // survives a tab close.
                     const downloaded = FailedUploads.triggerLocalDownload(
                         fileItem.file,
-                        fileItem.file?.name || `speakr-recording-${Date.now()}.webm`
+                        fileItem.file?.name || defaultRecordingFilename()
                     );
                     if (downloaded) {
                         showToast?.(
@@ -1316,7 +1325,7 @@ export function useUpload(state, utils) {
     // pass can try again.
     const handOffExhaustedUpload = async (failedUploadId, file) => {
         const downloaded = FailedUploads.triggerLocalDownload(
-            file, file?.name || `speakr-recording-${Date.now()}.webm`);
+            file, file?.name || defaultRecordingFilename());
         if (!downloaded) return false;
         try {
             await FailedUploads.deleteFailedUpload(failedUploadId);
@@ -1351,7 +1360,7 @@ export function useUpload(state, utils) {
                     // whose earlier hand-off download failed): give the audio
                     // back now instead of skipping it forever.
                     const file = new File([rec.fileData],
-                        rec.fileName || `speakr-recording-${Date.now()}.webm`,
+                        rec.fileName || defaultRecordingFilename(),
                         { type: rec.mimeType || 'audio/webm' });
                     await handOffExhaustedUpload(rec.id, file);
                     continue;
@@ -1367,7 +1376,7 @@ export function useUpload(state, utils) {
                     uploadQueue.value.splice(existingIdx, 1);
                 }
 
-                const file = new File([rec.fileData], rec.fileName || `speakr-recording-${Date.now()}.webm`,
+                const file = new File([rec.fileData], rec.fileName || defaultRecordingFilename(),
                     { type: rec.mimeType || 'audio/webm' });
                 uploadQueue.value.push({
                     file: markRaw ? markRaw(file) : file,

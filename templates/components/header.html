@@ -20,8 +20,8 @@
         <!-- LIST VIEW (or any non-detail screen): Speakr logo + name -->
         <div v-if="currentView !== 'detail' || !selectedRecording"
              class="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
-            <img src="{{ url_for('static', filename='img/icon-64.png') }}" srcset="{{ url_for('static', filename='img/icon-64.png') }} 1x, {{ url_for('static', filename='img/icon-128.png') }} 2x" alt="Speakr" class="app-logo w-7 h-7 sm:w-8 sm:h-8 flex-shrink-0">
-            <h1 class="text-lg sm:text-xl font-bold text-[var(--text-primary)] truncate">Speakr</h1>
+            <img src="{{ url_for('static', filename='img/icon-64-nexo.png') }}" srcset="{{ url_for('static', filename='img/icon-64-nexo.png') }} 1x, {{ url_for('static', filename='img/icon-128-nexo.png') }} 2x" alt="{{ app_name }}" class="app-logo w-7 h-7 sm:w-8 sm:h-8 flex-shrink-0">
+            <h1 class="text-lg sm:text-xl font-bold text-[var(--text-primary)] truncate">{{ app_name }}</h1>
         </div>
 
         <!-- DETAIL VIEW: recording title + inline meta + action icons.
@@ -37,7 +37,7 @@
                  pixels in edit mode. -->
             <div class="flex items-center gap-2 min-w-0 flex-1">
                 <a href="/" class="flex-shrink-0 hidden sm:block sm:mr-1.5" :title="t('tooltips.backToHome')">
-                    <img src="{{ url_for('static', filename='img/icon-64.png') }}" srcset="{{ url_for('static', filename='img/icon-64.png') }} 1x, {{ url_for('static', filename='img/icon-128.png') }} 2x" alt="Speakr" class="app-logo w-7 h-7">
+                    <img src="{{ url_for('static', filename='img/icon-64-nexo.png') }}" srcset="{{ url_for('static', filename='img/icon-64-nexo.png') }} 1x, {{ url_for('static', filename='img/icon-128-nexo.png') }} 2x" alt="{{ app_name }}" class="app-logo w-7 h-7">
                 </a>
                 <h1 v-if="!editingTitle"
                     @dblclick="selectedRecording.can_edit !== false ? toggleEditTitle() : null"

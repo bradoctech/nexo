@@ -1040,6 +1040,23 @@ def add_security_headers(response):
     return response
 
 # --- No-Crawl System: Serve robots.txt ---
+@app.route('/manifest.json')
+def manifest():
+    """Serve a manifest whose display name follows the instance branding."""
+    response = make_response(render_template('manifest.json'))
+    response.mimetype = 'application/manifest+json'
+    response.headers['Cache-Control'] = 'no-cache'
+    return response
+
+
+@app.route('/offline')
+def offline():
+    """Serve the cached offline page with the configured application name."""
+    response = make_response(render_template('offline.html'))
+    response.headers['Cache-Control'] = 'no-cache'
+    return response
+
+
 @app.route('/robots.txt')
 def robots_txt():
     """Serve robots.txt to instruct crawlers not to index the site."""

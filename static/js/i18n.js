@@ -179,8 +179,12 @@ class I18n {
             return key; // Return the key itself as fallback
         }
         
-        // Replace template variables
-        return this.interpolate(translation, params);
+        // The server supplies the configured application name with the
+        // translation bootstrap. Individual callers can still override it.
+        return this.interpolate(translation, {
+            appName: window.APP_NAME || 'Speakr',
+            ...params
+        });
     }
 
     /**

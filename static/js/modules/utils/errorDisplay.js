@@ -61,6 +61,7 @@ export function parseStoredError(text) {
  */
 function parseUnformattedError(text) {
     const lowerText = text.toLowerCase();
+    const appName = window.APP_NAME || 'Speakr';
 
     // Known error patterns
     const patterns = [
@@ -72,8 +73,8 @@ function parseUnformattedError(text) {
             // BEFORE the generic 413/file-too-large pattern below.
             patterns: ['request entity too large', 'request body is too large', '413 request entity too large'],
             title: 'Upload Blocked by Reverse Proxy',
-            message: 'The reverse proxy in front of Speakr rejected the upload before it reached Speakr.',
-            guidance: 'Increase the client body size limit on your reverse proxy. For nginx, set client_max_body_size to a value larger than your audio file. For Nginx Proxy Manager the default is 2000m and is adjustable per host in the Advanced tab. The chunking and compression options in Speakr do not apply here because the upload is rejected before Speakr sees it.',
+            message: `The reverse proxy in front of ${appName} rejected the upload before it reached ${appName}.`,
+            guidance: `Increase the client body size limit on your reverse proxy. For nginx, set client_max_body_size to a value larger than your audio file. For Nginx Proxy Manager the default is 2000m and is adjustable per host in the Advanced tab. The chunking and compression options in ${appName} do not apply here because the upload is rejected before ${appName} sees it.`,
             icon: 'fa-shield-halved',
             type: 'proxy_limit'
         },

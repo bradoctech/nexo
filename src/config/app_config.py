@@ -134,10 +134,10 @@ SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', '')
 SMTP_USE_TLS = os.environ.get('SMTP_USE_TLS', 'true').lower() == 'true'
 SMTP_USE_SSL = os.environ.get('SMTP_USE_SSL', 'false').lower() == 'true'
 SMTP_FROM_ADDRESS = os.environ.get('SMTP_FROM_ADDRESS', 'noreply@yourdomain.com')
-SMTP_FROM_NAME = os.environ.get('SMTP_FROM_NAME', 'Speakr')
 
 # Change the application name throughout the UI by setting the APP_NAME environment variable. Defaults to "Speakr".
 APP_NAME = os.environ.get('APP_NAME', 'Speakr')
+SMTP_FROM_NAME = os.environ.get('SMTP_FROM_NAME') or APP_NAME
 
 # Create chunking service at module level so it can be imported by processing.py
 # Always initialize the service - the needs_chunking() method will check ENABLE_CHUNKING

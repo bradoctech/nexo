@@ -5,6 +5,7 @@ Calendar/ICS file generation services.
 import json
 import uuid
 from datetime import datetime, timedelta
+from src.config.app_config import APP_NAME
 
 
 def generate_ics_content(event):
@@ -25,7 +26,7 @@ def generate_ics_content(event):
     lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        'PRODID:-//Speakr//Event Export//EN',
+        f'PRODID:-//{APP_NAME}//Event Export//EN',
         'CALSCALE:GREGORIAN',
         'METHOD:PUBLISH',
         'BEGIN:VEVENT',
@@ -129,7 +130,7 @@ def generate_combined_ics(events):
     Each VEVENT comes from generate_ics_content, so escaping, DTSTAMP and the
     default one-hour end are the same in both downloads (#412).
     """
-    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Speakr//Event Export//EN",
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", f"PRODID:-//{APP_NAME}//Event Export//EN",
              "CALSCALE:GREGORIAN", "METHOD:PUBLISH"]
     for event in events:
         in_event = False

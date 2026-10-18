@@ -55,7 +55,7 @@
                     <div class="t-body-strong" style="margin-bottom: var(--sp-1);">Option A. Tab audio (no install)</div>
                     <ol class="list-decimal list-inside space-y-1 t-body" style="color: var(--text-secondary);">
                         <li>Open the source content in a <strong>tab</strong> (YouTube, Zoom web, etc.)</li>
-                        <li>Click <strong>System Audio</strong> in Speakr and pick the tab in the share dialog</li>
+                        <li>Click <strong>System Audio</strong> in {{ app_name }} and pick the tab in the share dialog</li>
                         <li>Tick <strong>Share tab audio</strong> before clicking Share</li>
                     </ol>
                     <p class="t-meta" style="margin-top: var(--sp-2);">Works only for content playing in a browser tab. App audio (Slack, native Zoom client, etc.) won't be captured.</p>
@@ -65,7 +65,7 @@
                     <ol class="list-decimal list-inside space-y-1 t-body" style="color: var(--text-secondary);">
                         <li>Install <a href="https://existential.audio/blackhole/" target="_blank" rel="noopener" style="color: var(--text-accent); text-decoration: underline;">BlackHole 2ch</a> (free). The installer signs in with no kernel-extension prompts.</li>
                         <li>Open <strong>Audio MIDI Setup</strong> → create a <strong>Multi-Output Device</strong> containing your speakers + BlackHole. Set this as the system output.</li>
-                        <li>In Speakr, click <strong>Microphone</strong> and pick <strong>BlackHole 2ch</strong> as the input.</li>
+                        <li>In {{ app_name }}, click <strong>Microphone</strong> and pick <strong>BlackHole 2ch</strong> as the input.</li>
                     </ol>
                     <p class="t-meta" style="margin-top: var(--sp-2);">After this is set up, system audio captures continuously regardless of which tab/window is active.</p>
                 </div>
@@ -82,7 +82,7 @@
                 <div>
                     <div class="t-body-strong" style="margin-bottom: var(--sp-1);">System-wide capture</div>
                     <ol class="list-decimal list-inside space-y-1 t-body" style="color: var(--text-secondary);">
-                        <li>Click <strong>System Audio</strong> or <strong>Mic + System</strong> in Speakr</li>
+                        <li>Click <strong>System Audio</strong> or <strong>Mic + System</strong> in {{ app_name }}</li>
                         <li>In the share dialog, pick <strong>Entire Screen</strong></li>
                         <li>Tick <strong>Share system audio</strong> (bottom-left of the dialog)</li>
                         <li>Click <strong>Share</strong></li>
@@ -112,14 +112,14 @@
                     <div class="t-body-strong" style="margin-bottom: var(--sp-1);">Option A. Tab audio (no setup)</div>
                     <ol class="list-decimal list-inside space-y-1 t-body" style="color: var(--text-secondary);">
                         <li>Play the source content in a Chrome tab (YouTube, Zoom web, meeting URL, etc.)</li>
-                        <li>Click <strong>System Audio</strong> in Speakr, then pick that tab in the share dialog</li>
+                        <li>Click <strong>System Audio</strong> in {{ app_name }}, then pick that tab in the share dialog</li>
                         <li>Tick <strong>Share tab audio</strong> before clicking Share</li>
                     </ol>
                     <div class="banner banner--info" style="display: flex; align-items: flex-start; gap: var(--sp-2); margin-top: var(--sp-2);">
                         <i class="fas fa-circle-info" style="margin-top: 2px;"></i>
                         <div>
                             <div class="t-meta">
-                                <strong>This won't show up in pavucontrol.</strong> Chrome captures tab audio internally and never routes through PulseAudio, so the Recording tab will say "No application is currently recording audio." That's normal: Speakr's meter is the source of truth.
+                                <strong>This won't show up in pavucontrol.</strong> Chrome captures tab audio internally and never routes through PulseAudio, so the Recording tab will say "No application is currently recording audio." That's normal: {{ app_name }}'s meter is the source of truth.
                             </div>
                         </div>
                     </div>
@@ -132,16 +132,16 @@
                         Quick but limited: captures system audio at the cost of your mic input, useful only when you want to record what's playing through your headphones / speakers without your own voice.
                     </p>
                     <ol class="list-decimal list-inside space-y-1 t-body" style="color: var(--text-secondary); margin-top: var(--sp-2);">
-                        <li>Click <strong>Microphone</strong> in Speakr</li>
+                        <li>Click <strong>Microphone</strong> in {{ app_name }}</li>
                         <li>Open <code style="background: var(--bg-tertiary); padding: 1px 4px; border-radius: 3px;">pavucontrol</code> → <strong>Recording</strong> tab</li>
-                        <li>Change Speakr's capture source from your mic to <strong>Monitor of &lt;your output&gt;</strong></li>
+                        <li>Change {{ app_name }}'s capture source from your mic to <strong>Monitor of &lt;your output&gt;</strong></li>
                     </ol>
                 </div>
 
                 <div>
                     <div class="t-body-strong" style="margin-bottom: var(--sp-1);">Option C. Expose a virtual source so Chrome will list it (recommended)</div>
                     <p class="t-body" style="color: var(--text-secondary);">
-                        <strong>Why this is needed:</strong> Chrome on Linux deliberately filters "Monitor of …" sources out of the input device list it exposes to web apps, which is why Speakr's input-device picker doesn't show them even though pavucontrol does. The fix is to wrap a monitor source in a regular virtual source that Chrome doesn't filter. Once you do this, the new source appears in Speakr's picker and you can use it as either the primary input or as a "Also mix in" alongside your real mic to capture both your voice and system audio in one stream.
+                        <strong>Why this is needed:</strong> Chrome on Linux deliberately filters "Monitor of …" sources out of the input device list it exposes to web apps, which is why {{ app_name }}'s input-device picker doesn't show them even though pavucontrol does. The fix is to wrap a monitor source in a regular virtual source that Chrome doesn't filter. Once you do this, the new source appears in {{ app_name }}'s picker and you can use it as either the primary input or as a "Also mix in" alongside your real mic to capture both your voice and system audio in one stream.
                     </p>
                     <div class="banner banner--info" style="display: flex; align-items: flex-start; gap: var(--sp-2); margin: var(--sp-2) 0;">
                         <i class="fas fa-circle-info" style="margin-top: 2px;"></i>
@@ -153,7 +153,7 @@
                             <pre style="background: var(--bg-secondary); padding: var(--sp-2); border-radius: 4px; margin-top: var(--sp-1); overflow-x: auto; font-size: 11px;">pactl load-module module-virtual-source \
     source_name=speakr_loopback \
     master=&lt;sink_name&gt;.monitor</pre>
-                            <p style="margin-top: var(--sp-2);">Reload Speakr's input-device picker. You'll now see <strong>speakr_loopback</strong> in the dropdown. Pick it as <strong>"Also mix in"</strong> alongside your real mic and you'll capture both.</p>
+                            <p style="margin-top: var(--sp-2);">Reload {{ app_name }}'s input-device picker. You'll now see <strong>speakr_loopback</strong> in the dropdown. Pick it as <strong>"Also mix in"</strong> alongside your real mic and you'll capture both.</p>
                         </div>
                     </div>
                     <p class="t-meta">
@@ -177,7 +177,7 @@
                 <div>
                     <div class="t-body-strong" style="margin-bottom: var(--sp-1);">Virtual audio device detected</div>
                     <div class="t-meta">
-                        Speakr found these on your system. They're already wired up:
+                        {{ app_name }} found these on your system. They're already wired up:
                         <ul class="list-disc list-inside" style="margin-top: var(--sp-1);">
                             <li v-for="d in virtualAudioDevices" :key="d.deviceId">
                                 <span style="font-family: var(--font-mono, ui-monospace, monospace);" v-text="d.label"></span>.
@@ -248,7 +248,7 @@
                     <div>
                         <div class="t-body-strong" style="margin-bottom: var(--sp-1);">Where the audio ends up</div>
                         <p class="t-body" style="color: var(--text-secondary);">
-                            Captured audio goes to your Speakr server (self-hosted by you) and then to whichever ASR endpoint you've configured. If you're running a local Whisper or self-hosted ASR, audio never leaves your network. If your ASR is OpenAI or another cloud provider, audio gets sent there.
+                            Captured audio goes to your {{ app_name }} server (self-hosted by you) and then to whichever ASR endpoint you've configured. If you're running a local Whisper or self-hosted ASR, audio never leaves your network. If your ASR is OpenAI or another cloud provider, audio gets sent there.
                         </p>
                     </div>
                 </div>

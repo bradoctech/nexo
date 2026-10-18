@@ -6,6 +6,7 @@
 import { isPushEnabled, getPublicKey, urlBase64ToUint8Array } from '../../config/push-config.js';
 
 export function usePWA(state, utils) {
+    const appName = () => window.APP_NAME || 'Speakr';
     const {
         deferredInstallPrompt,
         showInstallButton,
@@ -50,7 +51,7 @@ export function usePWA(state, utils) {
         console.log(`[PWA] User response to install prompt: ${outcome}`);
 
         if (outcome === 'accepted') {
-            showToast('Installing Speakr...', 'success');
+            showToast(`Installing ${appName()}...`, 'success');
         }
 
         // Clear the deferred prompt since it can only be used once
@@ -78,7 +79,7 @@ export function usePWA(state, utils) {
         console.log('[PWA] App was installed');
         isPWAInstalled.value = true;
         showInstallButton.value = false;
-        showToast('Speakr installed successfully!', 'success');
+        showToast(`${appName()} installed successfully!`, 'success');
     };
 
     // --- Push Notifications ---
@@ -264,8 +265,8 @@ export function usePWA(state, utils) {
             const registration = await navigator.serviceWorker.ready;
 
             const defaultOptions = {
-                icon: '/static/img/icon-192x192.png',
-                badge: '/static/img/icon-192x192.png',
+                icon: '/static/img/icon-192x192-nexo.png',
+                badge: '/static/img/icon-192x192-nexo.png',
                 vibrate: [200, 100, 200],
                 tag: 'speakr-notification',
                 renotify: true,
@@ -340,11 +341,11 @@ export function usePWA(state, utils) {
             if (metadata) {
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: metadata.title || 'Untitled Recording',
-                    artist: metadata.artist || 'Speakr',
+                    artist: metadata.artist || appName(),
                     album: metadata.album || 'Recordings',
                     artwork: metadata.artwork || [
-                        { src: '/static/img/icon-192x192.png', sizes: '192x192', type: 'image/png' },
-                        { src: '/static/img/icon-512x512.png', sizes: '512x512', type: 'image/png' }
+                        { src: '/static/img/icon-192x192-nexo.png', sizes: '192x192', type: 'image/png' },
+                        { src: '/static/img/icon-512x512-nexo.png', sizes: '512x512', type: 'image/png' }
                     ]
                 });
                 currentMediaMetadata.value = metadata;

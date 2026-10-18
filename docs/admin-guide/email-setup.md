@@ -35,7 +35,8 @@ SMTP_USERNAME=your-email@gmail.com
 SMTP_PASSWORD=your-app-password
 SMTP_USE_TLS=true
 SMTP_FROM_ADDRESS=noreply@yourdomain.com
-SMTP_FROM_NAME=Speakr
+# Optional: defaults to APP_NAME; set only to use another sender name.
+# SMTP_FROM_NAME=My custom sender name
 ```
 
 Restart Speakr after updating environment variables.
@@ -53,7 +54,7 @@ Restart Speakr after updating environment variables.
 | `SMTP_USE_TLS` | `true` | Use STARTTLS encryption (port 587) |
 | `SMTP_USE_SSL` | `false` | Use SSL encryption (port 465) |
 | `SMTP_FROM_ADDRESS` | `noreply@yourdomain.com` | Email address shown in "From" field |
-| `SMTP_FROM_NAME` | `Speakr` | Display name shown alongside from address |
+| `SMTP_FROM_NAME` | `APP_NAME` | Optional display-name override shown alongside the from address |
 | `APP_BASE_URL` | (none) | External URL of this instance, used for links in notification email |
 
 ### Processing Notifications

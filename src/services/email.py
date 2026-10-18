@@ -18,6 +18,7 @@ from typing import Optional
 
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from flask import current_app, url_for
+from src.config.app_config import APP_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def get_email_config():
         'smtp_use_tls': os.environ.get('SMTP_USE_TLS', 'true').lower() == 'true',
         'smtp_use_ssl': os.environ.get('SMTP_USE_SSL', 'false').lower() == 'true',
         'from_address': os.environ.get('SMTP_FROM_ADDRESS', 'noreply@yourdomain.com'),
-        'from_name': os.environ.get('SMTP_FROM_NAME', 'Speakr'),
+        'from_name': os.environ.get('SMTP_FROM_NAME') or APP_NAME,
     }
 
 
@@ -127,7 +128,7 @@ def verify_reset_token(token: str) -> Optional[int]:
 # not reachable from wherever the recipient reads their mail.
 LOGO_CID = 'speakr-logo'
 _LOGO_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', 'static', 'img', 'icon-192x192.png')
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', 'static', 'img', 'icon-192x192-nexo.png')
 
 
 def _load_logo_bytes() -> Optional[bytes]:
@@ -248,10 +249,10 @@ def _get_email_template(content_html: str, content_text: str, subject: str) -> t
                                         <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                                             <tr>
                                                 <td style="vertical-align: middle; padding-right: 12px;">
-                                                    <img src="{logo_url}" alt="Speakr" width="44" height="44" style="display: block; border-radius: 8px;">
+                                                    <img src="{logo_url}" alt="{_h(APP_NAME)}" width="44" height="44" style="display: block; border-radius: 8px;">
                                                 </td>
                                                 <td style="vertical-align: middle;">
-                                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Speakr</h1>
+                                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">{_h(APP_NAME)}</h1>
                                                 </td>
                                             </tr>
                                         </table>
@@ -280,10 +281,10 @@ def _get_email_template(content_html: str, content_text: str, subject: str) -> t
                                 <tr>
                                     <td style="text-align: center;">
                                         <p style="color: #6b7280; font-size: 12px; margin: 0 0 8px 0;">
-                                            This email was sent by Speakr. If you have questions, please contact your administrator.
+                                            This email was sent by {_h(APP_NAME)}. If you have questions, please contact your administrator.
                                         </p>
                                         <p style="color: #9ca3af; font-size: 11px; margin: 0;">
-                                            &copy; {datetime.utcnow().year} Speakr &middot; AI-Powered Audio Transcription
+                                            &copy; {datetime.utcnow().year} {_h(APP_NAME)} &middot; AI-Powered Audio Transcription
                                         </p>
                                     </td>
                                 </tr>
@@ -305,7 +306,7 @@ def _get_email_template(content_html: str, content_text: str, subject: str) -> t
 {content_text}
 
 ---
-This email was sent by Speakr - AI-Powered Audio Transcription.
+This email was sent by {APP_NAME} - AI-Powered Audio Transcription.
 If you have questions, please contact your administrator.
 """
 
@@ -340,7 +341,7 @@ def send_verification_email(user) -> bool:
     # Build verification URL
     verify_url = url_for('auth.verify_email', token=token, _external=True)
 
-    subject = "Verify your email address - Speakr"
+    subject = f"Verify your email address - {APP_NAME}"
 
     content_html = f"""
 <h2 style="color: #1f2937; margin: 0 0 24px 0; font-size: 24px; font-weight: 600;">Verify Your Email Address</h2>
@@ -348,7 +349,7 @@ def send_verification_email(user) -> bool:
 <p style="color: #374151; margin: 0 0 16px 0; font-size: 16px;">Hi {_h(user.username)},</p>
 
 <p style="color: #374151; margin: 0 0 24px 0; font-size: 16px;">
-    Welcome to Speakr! To complete your registration and start transcribing your audio recordings, please verify your email address.
+    Welcome to {_h(APP_NAME)}! To complete your registration and start transcribing your audio recordings, please verify your email address.
 </p>
 
 <div style="text-align: center; margin: 32px 0;">
@@ -361,20 +362,20 @@ def send_verification_email(user) -> bool:
 <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #e5e7eb;">
     <p style="color: #9ca3af; font-size: 13px; margin: 0;">
         <strong>This link will expire in 24 hours.</strong><br>
-        If you didn't create an account on Speakr, you can safely ignore this email.
+        If you didn't create an account on {_h(APP_NAME)}, you can safely ignore this email.
     </p>
 </div>
 """
 
     content_text = f"""Hi {user.username},
 
-Welcome to Speakr! To complete your registration and start transcribing your audio recordings, please verify your email address.
+Welcome to {APP_NAME}! To complete your registration and start transcribing your audio recordings, please verify your email address.
 
 Click here to verify: {verify_url}
 
 This link will expire in 24 hours.
 
-If you didn't create an account on Speakr, you can safely ignore this email."""
+If you didn't create an account on {APP_NAME}, you can safely ignore this email."""
 
     html_body, text_body = _get_email_template(content_html, content_text, subject)
     return _send_email(user.email, subject, html_body, text_body)
@@ -404,7 +405,7 @@ def send_password_reset_email(user) -> bool:
     # Build reset URL
     reset_url = url_for('auth.reset_password', token=token, _external=True)
 
-    subject = "Reset your password - Speakr"
+    subject = f"Reset your password - {APP_NAME}"
 
     content_html = f"""
 <h2 style="color: #1f2937; margin: 0 0 24px 0; font-size: 24px; font-weight: 600;">Reset Your Password</h2>
@@ -412,7 +413,7 @@ def send_password_reset_email(user) -> bool:
 <p style="color: #374151; margin: 0 0 16px 0; font-size: 16px;">Hi {_h(user.username)},</p>
 
 <p style="color: #374151; margin: 0 0 24px 0; font-size: 16px;">
-    We received a request to reset your Speakr account password. Click the button below to create a new password.
+    We received a request to reset your {_h(APP_NAME)} account password. Click the button below to create a new password.
 </p>
 
 <div style="text-align: center; margin: 32px 0;">
@@ -441,7 +442,7 @@ def send_password_reset_email(user) -> bool:
 
     content_text = f"""Hi {user.username},
 
-We received a request to reset your Speakr account password. Click the link below to create a new password:
+We received a request to reset your {APP_NAME} account password. Click the link below to create a new password:
 
 {reset_url}
 
@@ -621,7 +622,7 @@ def send_transcription_complete_email(user, recording) -> bool:
 <p style="color: #374151; margin: 0 0 16px 0; font-size: 16px;">Hi {_h(user.username)},</p>
 
 <p style="color: #374151; margin: 0 0 8px 0; font-size: 16px;">
-    Speakr has finished transcribing <strong>{_h(title)}</strong>. It is waiting for you in your library.
+    {_h(APP_NAME)} has finished transcribing <strong>{_h(title)}</strong>. It is waiting for you in your library.
 </p>
 
 {_detail_rows_html(rows)}
@@ -629,7 +630,7 @@ def send_transcription_complete_email(user, recording) -> bool:
 
 <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #e5e7eb;">
     <p style="color: #9ca3af; font-size: 13px; margin: 0;">
-        You are receiving this because you turned on email notifications in your Speakr account settings. You can turn them off there at any time.
+        You are receiving this because you turned on email notifications in your {_h(APP_NAME)} account settings. You can turn them off there at any time.
     </p>
 </div>
 """
@@ -638,11 +639,11 @@ def send_transcription_complete_email(user, recording) -> bool:
     link_line = f'\nOpen it here: {url}\n' if url else ''
     content_text = f"""Hi {user.username},
 
-Speakr has finished transcribing "{title}". It is waiting for you in your library.
+{APP_NAME} has finished transcribing "{title}". It is waiting for you in your library.
 
 {detail_lines}
 {link_line}
-You are receiving this because you turned on email notifications in your Speakr
+You are receiving this because you turned on email notifications in your {APP_NAME}
 account settings. You can turn them off there at any time."""
 
     html_body, text_body = _get_email_template(content_html, content_text, subject)
@@ -673,7 +674,7 @@ def send_transcription_failed_email(user, recording, error: str = None) -> bool:
 <p style="color: #374151; margin: 0 0 16px 0; font-size: 16px;">Hi {_h(user.username)},</p>
 
 <p style="color: #374151; margin: 0 0 24px 0; font-size: 16px;">
-    Speakr was not able to transcribe <strong>{_h(title)}</strong>. The recording itself is safe and you can retry it from your library.
+    {_h(APP_NAME)} was not able to transcribe <strong>{_h(title)}</strong>. The recording itself is safe and you can retry it from your library.
 </p>
 
 {reason_html}
@@ -681,7 +682,7 @@ def send_transcription_failed_email(user, recording, error: str = None) -> bool:
 
 <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #e5e7eb;">
     <p style="color: #9ca3af; font-size: 13px; margin: 0;">
-        You are receiving this because you turned on email notifications in your Speakr account settings. You can turn them off there at any time.
+        You are receiving this because you turned on email notifications in your {_h(APP_NAME)} account settings. You can turn them off there at any time.
     </p>
 </div>
 """
@@ -690,10 +691,10 @@ def send_transcription_failed_email(user, recording, error: str = None) -> bool:
     link_line = f'\nOpen it here: {url}\n' if url else ''
     content_text = f"""Hi {user.username},
 
-Speakr was not able to transcribe "{title}". The recording itself is safe and you
+{APP_NAME} was not able to transcribe "{title}". The recording itself is safe and you
 can retry it from your library.
 {reason_text}{link_line}
-You are receiving this because you turned on email notifications in your Speakr
+You are receiving this because you turned on email notifications in your {APP_NAME}
 account settings. You can turn them off there at any time."""
 
     html_body, text_body = _get_email_template(content_html, content_text, subject)

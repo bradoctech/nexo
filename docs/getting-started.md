@@ -226,7 +226,8 @@ SMTP_USERNAME=your-email@gmail.com
 SMTP_PASSWORD=your-app-password  # Use App Password for Gmail
 SMTP_USE_TLS=true
 SMTP_FROM_ADDRESS=noreply@yourdomain.com
-SMTP_FROM_NAME=Speakr
+# Optional: defaults to APP_NAME; set only to use another sender name.
+# SMTP_FROM_NAME=My custom sender name
 ```
 
 When enabled, new users receive a verification email after registration. Password reset is available from the login page via "Forgot password?" link. See the [Email Setup Guide](admin-guide/email-setup.md) for detailed configuration including provider-specific examples for Gmail, SendGrid, Mailgun, and more.

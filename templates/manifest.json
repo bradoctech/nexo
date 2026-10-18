@@ -1,8 +1,8 @@
 {
   "id": "com.speakr.app",
-  "name": "Speakr",
-  "short_name": "Speakr",
-  "description": "Speakr - Audio transcription and summarization",
+  "name": {{ app_name|tojson }},
+  "short_name": {{ app_name|tojson }},
+  "description": {{ (app_name ~ ' - Audio transcription and summarization')|tojson }},
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -15,25 +15,25 @@
   "dir": "ltr",
   "icons": [
     {
-      "src": "/static/img/icon-192x192.png",
+      "src": "/static/img/icon-192x192-nexo.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/static/img/icon-maskable-512x512.png",
+      "src": "/static/img/icon-maskable-512x512-nexo.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/static/img/icon-512x512.png",
+      "src": "/static/img/icon-512x512-nexo.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/static/img/icon-180x180.png",
+      "src": "/static/img/icon-180x180-nexo.png",
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
@@ -75,14 +75,14 @@
       "short_name": "New",
       "description": "Upload or record new audio",
       "url": "/#upload",
-      "icons": [{ "src": "/static/img/icon-192x192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/static/img/icon-192x192-nexo.png", "sizes": "192x192" }]
     },
     {
       "name": "View Gallery",
       "short_name": "Gallery",
       "description": "Access your recordings gallery",
       "url": "/#gallery",
-      "icons": [{ "src": "/static/img/icon-192x192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/static/img/icon-192x192-nexo.png", "sizes": "192x192" }]
     }
   ],
   "share_target": {

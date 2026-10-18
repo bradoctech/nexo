@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional
 from datetime import datetime
+from src.config.app_config import APP_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -88,12 +89,13 @@ def get_export_labels(language: str) -> dict:
         'tags': 'Tags',
         'transcriptionTime': 'Transcription Time',
         'summarizationTime': 'Summarization Time',
-        'footer': 'Generated with [Speakr](https://github.com/learnedmachine/speakr)'
+        'footer': 'Generated with [{{appName}}](https://github.com/learnedmachine/speakr)'
     }
 
     # Merge defaults with loaded labels
     result = defaults.copy()
     result.update(export_labels)
+    result['footer'] = result['footer'].replace('{{appName}}', APP_NAME)
 
     return result
 

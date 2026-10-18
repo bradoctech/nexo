@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from werkzeug.utils import secure_filename
+from src.config.app_config import APP_NAME
 
 # Configuration from environment
 ENABLE_AUTO_EXPORT = os.environ.get('ENABLE_AUTO_EXPORT', 'false').lower() == 'true'
@@ -613,7 +614,7 @@ def generate_from_template(recording, user, template_str, labels, user_language,
     rendered = render_export_template(template_str, context, labels)
 
     # Always append hardcoded footer
-    footer = labels.get('footer', 'Generated with [Speakr](https://github.com/learnedmachine/speakr)')
+    footer = labels.get('footer', f'Generated with [{APP_NAME}](https://github.com/learnedmachine/speakr)')
     rendered += f"\n\n---\n\n*{footer}*\n"
 
     return rendered
@@ -707,7 +708,7 @@ def generate_default_markdown(recording, user, labels, user_language,
     # Footer
     lines.append("---")
     lines.append("")
-    footer = labels.get('footer', 'Generated with [Speakr](https://github.com/learnedmachine/speakr)')
+    footer = labels.get('footer', f'Generated with [{APP_NAME}](https://github.com/learnedmachine/speakr)')
     lines.append(f"*{footer}*")
     lines.append("")
 

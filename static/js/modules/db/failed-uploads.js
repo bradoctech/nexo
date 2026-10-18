@@ -7,6 +7,15 @@ const DB_NAME = 'SpeakrFailedUploads';
 const DB_VERSION = 1;
 const STORE_NAME = 'failedUploads';
 
+const defaultRecordingFilename = () => {
+    const name = (window.APP_NAME || 'Speakr')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'speakr';
+    return `${name}-recording-${Date.now()}.webm`;
+};
+
 let dbInstance = null;
 
 /**
@@ -288,7 +297,7 @@ export const triggerLocalDownload = (file, suggestedName) => {
         const url = URL.createObjectURL(file);
         const anchor = document.createElement('a');
         anchor.href = url;
-        anchor.download = suggestedName || file.name || `speakr-recording-${Date.now()}.webm`;
+        anchor.download = suggestedName || file.name || defaultRecordingFilename();
         anchor.style.display = 'none';
         document.body.appendChild(anchor);
         anchor.click();

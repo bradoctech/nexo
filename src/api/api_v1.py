@@ -45,6 +45,7 @@ from src.api.recordings import (
 )
 from src.services.storage import get_storage_service
 from src.utils.token_auth import load_user_from_token_value
+from src.config.app_config import APP_NAME
 
 # Create blueprint with /api/v1 prefix
 api_v1_bp = Blueprint('api_v1', __name__, url_prefix='/api/v1')
@@ -114,8 +115,8 @@ def format_bytes(bytes_value: int) -> str:
 OPENAPI_SPEC = {
     "openapi": "3.0.3",
     "info": {
-        "title": "Speakr API",
-        "description": "REST API for Speakr - Audio transcription and note-taking application.\n\n## Authentication\nMost endpoints require token authentication via one of:\n- `Authorization: Bearer <token>`\n- `X-API-Token: <token>`\n- `API-Token: <token>`\n- `?token=<token>` query parameter\n\nThe ASR Voice Recorder integration is the one exception: its required multipart `secret` field contains the personal Speakr API token because that client cannot set custom authorization headers. Generate tokens in Settings > API Tokens.",
+        "title": f"{APP_NAME} API",
+        "description": f"REST API for {APP_NAME} - Audio transcription and note-taking application.\n\n## Authentication\nMost endpoints require token authentication via one of:\n- `Authorization: Bearer <token>`\n- `X-API-Token: <token>`\n- `API-Token: <token>`\n- `?token=<token>` query parameter\n\nThe ASR Voice Recorder integration is the one exception: its required multipart `secret` field contains the personal {APP_NAME} API token because that client cannot set custom authorization headers. Generate tokens in Settings > API Tokens.",
         "version": "1.0.0"
     },
     "servers": [{"url": "/api/v1", "description": "API v1"}],
@@ -491,9 +492,9 @@ OPENAPI_SPEC = {
                 "summary": "Receive a completed ASR Voice Recorder recording",
                 "description": (
                     "Accepts ASR Voice Recorder's multipart webhook format and queues the "
-                    "recording through Speakr's normal transcription pipeline. It also accepts "
+                    f"recording through {APP_NAME}'s normal transcription pipeline. It also accepts "
                     "ASR's authenticated, fileless connection test without creating a recording. "
-                    "The required `secret` field must contain a personal Speakr API token. Session "
+                    f"The required `secret` field must contain a personal {APP_NAME} API token. Session "
                     "cookies and the API's normal authentication headers do not authenticate this endpoint."
                 ),
                 "security": [],
@@ -507,9 +508,9 @@ OPENAPI_SPEC = {
                                 "properties": {
                                     "file": {"type": "string", "format": "binary", "description": "Required for a completed recording upload; omitted by ASR's connection test"},
                                     "file_name": {"type": "string", "description": "Optional original filename override"},
-                                    "secret": {"type": "string", "format": "password", "writeOnly": True, "description": "A personal Speakr API token"},
+                                    "secret": {"type": "string", "format": "password", "writeOnly": True, "description": f"A personal {APP_NAME} API token"},
                                     "date": {"type": "integer", "format": "int64", "description": "Recording time as Unix epoch seconds or milliseconds"},
-                                    "duration": {"type": "number", "description": "Accepted for ASR compatibility but ignored; Speakr measures the media duration"},
+                                    "duration": {"type": "number", "description": f"Accepted for ASR compatibility but ignored; {APP_NAME} measures the media duration"},
                                     "note": {"type": "string", "description": "Stored as the recording notes"},
                                 },
                             }
@@ -674,7 +675,7 @@ def get_docs():
     html = f'''<!DOCTYPE html>
 <html>
 <head>
-    <title>Speakr API v1 Documentation</title>
+    <title>{APP_NAME} API v1 Documentation</title>
     <link rel="stylesheet" href="{css_url}" />
 </head>
 <body>
